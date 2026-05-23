@@ -7,6 +7,8 @@
   'use strict';
 
   const ext = globalThis.chrome || globalThis.browser;
+  const EMBEDDED_WAYF_RETRY_MS = 3000;
+  const EMBEDDED_WAYF_RETRY_INTERVAL_MS = 150;
 
   // ── Security: only auto-fill on the actual ETHZ Identity Provider ──
   const TRUSTED_IDP_HOSTS = ['aai-logon.ethz.ch'];
@@ -44,6 +46,7 @@
   // These have a dropdown to select your institution before triggering the SSO flow.
   const ETH_IDP_VALUE = 'https://aai-logon.ethz.ch/idp/shibboleth';
   const ETH_IDP_TEXT = /ETH Z(u|ü)rich/i;
+  const submittedWayfPages = new Set();
 
   const isEthIdpValue = (value) =>
     (value || '').includes(ETH_IDP_VALUE) || ETH_IDP_TEXT.test(value || '');
@@ -51,14 +54,30 @@
   const isHiddenIdpField = (input) =>
     /idp|entityid|entity_id|provider/i.test(`${input.name || ''} ${input.id || ''}`);
 
+  const findEthIdpOption = (select) => {
+    const options = Array.from(select.options);
+    return options.find((opt) => opt.value === ETH_IDP_VALUE) ||
+      options.find((opt) => isEthIdpValue(opt.value) || isEthIdpValue(opt.text));
+  };
+
   const getEmbeddedWayfControl = () => {
-    // Moodle uses select[name="idp"], WAYF uses select[name="user_idp"]
-    const select = document.querySelector('select[name="user_idp"], select#userIdPSelection, select[name="idp"], select#idp');
-    if (select) {
-      const option = Array.from(select.options).find(
-        opt => isEthIdpValue(opt.value) || isEthIdpValue(opt.text)
-      );
-      if (option) return { control: select, form: select.closest('form'), option };
+    const selectSelectors = [
+      'form#login select#idp[name="idp"]',
+      'form#login select[name="idp"]',
+      'select[name="user_idp"]',
+      'select#userIdPSelection',
+      'select[name="idp"]',
+      'select#idp'
+    ];
+
+    for (const selector of selectSelectors) {
+      const select = document.querySelector(selector);
+      if (!select) continue;
+
+      const option = findEthIdpOption(select);
+      if (option) {
+        return { control: select, form: select.closest('form'), option };
+      }
     }
 
     const textInput = Array.from(
@@ -80,7 +99,13 @@
     return `${el.textContent || ''} ${el.getAttribute('aria-label') || ''} ${el.name || ''}`;
   };
 
+  const isPotentialEmbeddedWayfPage = () =>
+    location.pathname.includes('/auth/shibboleth/login.php') ||
+    !!document.querySelector('form#login select#idp[name="idp"], select[name="user_idp"], select#userIdPSelection, select[name="idp"], select#idp, input#userIdPSelection_iddtext, input.idd_textbox');
+
   const findWayfSubmitButton = (form) => {
+    if (!form) return null;
+
     const selectors = [
       'button[name="Select"]',
       'input[name="Select"]',
@@ -89,7 +114,7 @@
       'button',
       'input[type="button"]'
     ];
-    const pattern = /select|continue|weiter|fortfahren/i;
+    const pattern = /select|continue|weiter|fortfahren|auswahl|wählen/i;
 
     const findIn = (root, includeGenericText) => {
       if (!root) return null;
@@ -103,9 +128,93 @@
       }) || null;
     };
 
-    return findIn(form, true) ||
-      document.querySelector('button[name="Select"], input[name="Select"], input[type="submit"][value="Select"], input[type="submit"][value="Continue"], input[type="submit"][value="Weiter"], input[type="submit"][value="Fortfahren"]') ||
-      null;
+    return findIn(form, true);
+  };
+
+  const submitWayfForm = (form, submitBtn) => {
+    try {
+      if (form && typeof form.requestSubmit === 'function') {
+        form.requestSubmit(submitBtn || undefined);
+        return;
+      }
+    } catch (_) {
+      // Fall back to the explicit click path for non-submit controls.
+    }
+
+    submitBtn?.click();
+  };
+
+  const submitEmbeddedWayf = (wayf) => {
+    const guardKey = 'ethz_wayf_guard_' + location.origin + location.pathname;
+    if (submittedWayfPages.has(guardKey)) return;
+
+    submittedWayfPages.add(guardKey);
+    ext.storage.session.get([guardKey], (guardResult) => {
+      const lastSubmit = guardResult[guardKey] || 0;
+      if (Date.now() - lastSubmit < 30000) return; // Already tried in last 30s — stop
+
+      const submitBtn = findWayfSubmitButton(wayf.form);
+      if (!submitBtn) {
+        submittedWayfPages.delete(guardKey);
+        return;
+      }
+
+      if (wayf.option) {
+        wayf.control.value = wayf.option.value;
+        wayf.control.dispatchEvent(new Event('input', { bubbles: true }));
+        wayf.control.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+
+      const searchBox = document.querySelector('input#userIdPSelection_iddtext, input.idd_textbox');
+      if (searchBox) {
+        searchBox.value = 'ETH Zurich';
+        searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+        searchBox.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+
+      ext.storage.session.set({ [guardKey]: Date.now() });
+      showOverlay();
+      setTimeout(() => submitWayfForm(wayf.form, submitBtn), 300);
+    });
+  };
+
+  const trySubmitEmbeddedWayf = (previouslyFailed) => {
+    if (previouslyFailed) return false;
+
+    const wayf = getEmbeddedWayfControl();
+    if (!wayf) return false;
+
+    submitEmbeddedWayf(wayf);
+    return true;
+  };
+
+  const watchForEmbeddedWayf = (previouslyFailed) => {
+    if (previouslyFailed || !isPotentialEmbeddedWayfPage()) return false;
+    if (trySubmitEmbeddedWayf(previouslyFailed)) return true;
+
+    let settled = false;
+    let intervalId = null;
+    let timeoutId = null;
+    let observer = null;
+
+    const stop = () => {
+      settled = true;
+      if (intervalId) clearInterval(intervalId);
+      if (timeoutId) clearTimeout(timeoutId);
+      observer?.disconnect();
+    };
+
+    const attempt = () => {
+      if (settled) return;
+      if (trySubmitEmbeddedWayf(previouslyFailed)) stop();
+    };
+
+    observer = new MutationObserver(attempt);
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    intervalId = setInterval(attempt, EMBEDDED_WAYF_RETRY_INTERVAL_MS);
+    timeoutId = setTimeout(stop, EMBEDDED_WAYF_RETRY_MS);
+
+    return true;
   };
 
   // ── GitLab LDAP login detection ──
@@ -527,37 +636,7 @@
           // ─── Embedded WAYF / org-selection pages ───
           // E.g., Moodle's /auth/shibboleth/login.php with a dropdown to pick ETH Zurich.
           // Auto-select ETH Zurich and submit, with loop guard.
-          const wayf = getEmbeddedWayfControl();
-          if (wayf && !previouslyFailed) {
-            // Loop guard: check if we already submitted on this page recently
-            const guardKey = 'ethz_wayf_guard_' + location.origin + location.pathname;
-            ext.storage.session.get([guardKey], (guardResult) => {
-              const lastSubmit = guardResult[guardKey] || 0;
-              if (Date.now() - lastSubmit < 30000) return; // Already tried in last 30s — stop
-
-              // Select ETH Zurich
-              if (wayf.option) {
-                wayf.control.value = wayf.option.value;
-                wayf.control.dispatchEvent(new Event('change', { bubbles: true }));
-              }
-
-              // Also fill the text search box if present (newer WAYF UI)
-              const searchBox = document.querySelector('input#userIdPSelection_iddtext, input.idd_textbox');
-              if (searchBox) {
-                searchBox.value = 'ETH Zurich';
-                searchBox.dispatchEvent(new Event('input', { bubbles: true }));
-                searchBox.dispatchEvent(new Event('change', { bubbles: true }));
-              }
-
-              // Click submit
-              const submitBtn = findWayfSubmitButton(wayf.form);
-              if (submitBtn) {
-                // Set guard before submitting
-                ext.storage.session.set({ [guardKey]: Date.now() });
-                showOverlay();
-                setTimeout(() => submitBtn.click(), 300);
-              }
-            });
+          if (watchForEmbeddedWayf(previouslyFailed)) {
             return;
           }
 
