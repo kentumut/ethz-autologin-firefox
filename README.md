@@ -24,13 +24,19 @@ Chrome uses `manifest.json` directly. This remains the primary Chrome manifest a
 
 Firefox is built as a separate target so Chrome support is not replaced.
 
-1. Build the Firefox extension:
+For temporary development installs:
+
+1. Install development tooling:
+   ```sh
+   npm install
+   ```
+2. Build the Firefox extension:
    ```sh
    npm run build:firefox
    ```
-2. Open Firefox → `about:debugging#/runtime/this-firefox`
-3. Click **Load Temporary Add-on...**
-4. Select `dist/firefox/manifest.json`
+3. Open Firefox → `about:debugging#/runtime/this-firefox`
+4. Click **Load Temporary Add-on...**
+5. Select `dist/firefox/manifest.json`
 
 For development with Mozilla's tooling:
 
@@ -44,11 +50,69 @@ To lint the Firefox build:
 npm run lint:firefox
 ```
 
+For long-term Firefox or Zen Browser installs, use a signed unlisted XPI instead of the temporary `about:debugging` install.
+
+## Signed Firefox XPI
+
+Firefox release builds require signed add-ons for permanent installation. The easiest private path is an **unlisted** Mozilla-signed XPI: it is signed by Mozilla, but it is not searchable or publicly listed on addons.mozilla.org.
+
+1. Install development tooling:
+   ```sh
+   npm install
+   ```
+2. Create a Mozilla Add-ons developer account.
+3. Open the AMO Developer Hub API credentials page and create JWT credentials.
+4. Create a local `.env` file from the example:
+   ```sh
+   cp .env.example .env
+   ```
+5. Paste your AMO credentials into `.env`:
+   ```sh
+   WEB_EXT_API_KEY=your-jwt-issuer
+   WEB_EXT_API_SECRET=your-jwt-secret
+   ```
+6. Lint the Firefox build:
+   ```sh
+   npm run lint:firefox
+   ```
+7. Sign the unlisted XPI:
+   ```sh
+   npm run sign:firefox
+   ```
+8. Install the signed `.xpi` from `artifacts/firefox-signed/` by opening it in Firefox or Zen Browser.
+9. Restart the browser and confirm the extension remains installed.
+
+Do not commit AMO credentials. The `.env` file is ignored by git, and `npm run sign:firefox` loads it only for the signing command.
+
+The signing script checks that `.env` contains non-placeholder values before calling Mozilla. `web-ext sign` does not support `--overwrite-dest`, so if you need to discard old signed artifacts, remove files from `artifacts/firefox-signed/` manually before signing again.
+
+For a local unsigned package, run:
+
+```sh
+npm run package:firefox
+```
+
+Unsigned packages are useful for inspection, but normal Firefox release builds require Mozilla signing for long-term installation.
+
+Suggested reviewer notes for unlisted signing:
+
+```text
+ETHZ Auto-Login stores the user's ETHZ username and password locally in browser extension storage.
+The extension does not make analytics, telemetry, API, or other outbound network requests.
+Credentials are only filled on the trusted ETHZ IdP host aai-logon.ethz.ch and LDAP login on gitlab.inf.ethz.ch.
+The wayf.switch.ch content script only selects ETH Zurich as the identity provider.
+Build command: npm run build:firefox
+Firefox source directory for review/signing: dist/firefox
+```
+
+For updates, increment the extension version in `manifest.firefox.json`, rebuild, and run `npm run sign:firefox` again.
+
 ## Build Targets
 
 ```sh
 npm run build:chrome
 npm run build:firefox
+npm run package:firefox
 npm run build
 ```
 
