@@ -7,6 +7,7 @@
   'use strict';
 
   const ext = globalThis.chrome || globalThis.browser;
+  const sessionStorage = ext.storage.session || ext.storage.local;
   const EMBEDDED_WAYF_RETRY_MS = 3000;
   const EMBEDDED_WAYF_RETRY_INTERVAL_MS = 150;
 
@@ -149,7 +150,7 @@
     if (submittedWayfPages.has(guardKey)) return;
 
     submittedWayfPages.add(guardKey);
-    ext.storage.session.get([guardKey], (guardResult) => {
+    sessionStorage.get([guardKey], (guardResult) => {
       const lastSubmit = guardResult[guardKey] || 0;
       if (Date.now() - lastSubmit < 30000) return; // Already tried in last 30s — stop
 
@@ -172,7 +173,7 @@
         searchBox.dispatchEvent(new Event('change', { bubbles: true }));
       }
 
-      ext.storage.session.set({ [guardKey]: Date.now() });
+      sessionStorage.set({ [guardKey]: Date.now() });
       showOverlay();
       setTimeout(() => submitWayfForm(wayf.form, submitBtn), 300);
     });

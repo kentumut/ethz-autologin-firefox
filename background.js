@@ -2,6 +2,7 @@
 // Handles first-install welcome page, login failure tracking, and logout bypass.
 
 const ext = globalThis.chrome || globalThis.browser;
+const sessionStorage = ext.storage.session || ext.storage.local;
 
 // Open the welcome/setup page on first install
 ext.runtime.onInstalled.addListener((details) => {
@@ -29,15 +30,16 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   // Logout detected by content script — store bypass timestamp
-  // Uses extension session storage (in-memory, cleared when browser closes)
+  // Uses extension session storage when available, with local storage fallback
+  // for browsers that do not expose storage.session.
   if (message.type === 'LOGOUT_DETECTED') {
-    ext.storage.session.set({ ethz_logout_at: Date.now() });
+    sessionStorage.set({ ethz_logout_at: Date.now() });
     sendResponse({ ok: true });
   }
 
   // Content script asks if logout bypass is active
   if (message.type === 'CHECK_LOGOUT_BYPASS') {
-    ext.storage.session.get(['ethz_logout_at'], (result) => {
+    sessionStorage.get(['ethz_logout_at'], (result) => {
       const logoutAt = result.ethz_logout_at || 0;
       const elapsed = Date.now() - logoutAt;
       // 30 second window — covers the redirect chain but not future visits
