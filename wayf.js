@@ -6,15 +6,17 @@
 (() => {
   'use strict';
 
+  const ext = globalThis.chrome || globalThis.browser;
+
   const ETH_IDP_VALUE = 'https://aai-logon.ethz.ch/idp/shibboleth';
 
   const run = () => {
     // Only act if user has saved credentials
-    chrome.storage.local.get(['ethz_username', 'ethz_password'], (result) => {
+    ext.storage.local.get(['ethz_username', 'ethz_password'], (result) => {
       if (!result.ethz_username || !result.ethz_password) return;
 
       // Check for logout bypass
-      chrome.runtime.sendMessage({ type: 'CHECK_LOGOUT_BYPASS' }, (response) => {
+      ext.runtime.sendMessage({ type: 'CHECK_LOGOUT_BYPASS' }, (response) => {
         if (response?.bypassed) return;
 
         // Find the organisation select dropdown
@@ -61,29 +63,32 @@
     if (document.getElementById('ethz-autologin-overlay')) return;
     const overlay = document.createElement('div');
     overlay.id = 'ethz-autologin-overlay';
-    overlay.innerHTML = `
-      <style>
-        #ethz-autologin-overlay {
-          position: fixed; inset: 0; z-index: 2147483647;
-          display: flex; flex-direction: column; align-items: center; justify-content: center;
-          background: #ffffff;
-          font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
-          color: #1F407A;
-        }
-        #ethz-autologin-overlay .ethz-spinner {
-          width: 32px; height: 32px;
-          border: 3px solid #e0e0e0; border-top-color: #1F407A;
-          border-radius: 50%; animation: ethz-spin 0.8s linear infinite;
-          margin-bottom: 16px;
-        }
-        #ethz-autologin-overlay .ethz-label {
-          font-size: 15px; font-weight: 500; letter-spacing: 0.01em;
-        }
-        @keyframes ethz-spin { to { transform: rotate(360deg); } }
-      </style>
-      <div class="ethz-spinner"></div>
-      <div class="ethz-label">Signing in to ETHZ…</div>
+    const style = document.createElement('style');
+    style.textContent = `
+      #ethz-autologin-overlay {
+        position: fixed; inset: 0; z-index: 2147483647;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        background: #ffffff;
+        font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+        color: #1F407A;
+      }
+      #ethz-autologin-overlay .ethz-spinner {
+        width: 32px; height: 32px;
+        border: 3px solid #e0e0e0; border-top-color: #1F407A;
+        border-radius: 50%; animation: ethz-spin 0.8s linear infinite;
+        margin-bottom: 16px;
+      }
+      #ethz-autologin-overlay .ethz-label {
+        font-size: 15px; font-weight: 500; letter-spacing: 0.01em;
+      }
+      @keyframes ethz-spin { to { transform: rotate(360deg); } }
     `;
+    const spinner = document.createElement('div');
+    spinner.className = 'ethz-spinner';
+    const label = document.createElement('div');
+    label.className = 'ethz-label';
+    label.textContent = 'Signing in to ETHZ…';
+    overlay.append(style, spinner, label);
     document.documentElement.appendChild(overlay);
 
     // Safety timeout: remove overlay after 5s if page hasn't navigated

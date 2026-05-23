@@ -6,6 +6,8 @@
 (() => {
   'use strict';
 
+  const ext = globalThis.chrome || globalThis.browser;
+
   // ── Security: only auto-fill on the actual ETHZ Identity Provider ──
   const TRUSTED_IDP_HOSTS = ['aai-logon.ethz.ch'];
 
@@ -108,9 +110,9 @@
 
   // ── Logout detection ──
   // Watches for clicks on logout links/buttons. On click, notifies the background
-  // script which stores a 30-second bypass window in chrome.storage.session.
+  // script which stores a 30-second bypass window in extension session storage.
   // This survives the page navigation (unlike JS variables) but expires quickly
-  // (unlike the old 10-minute chrome.storage.local approach).
+  // (unlike the old 10-minute local-storage approach).
   const LOGOUT_PATTERN = /log\s*out|sign\s*out|abmelden|ausloggen|d[eé]connexion/i;
 
   const watchForLogout = () => {
@@ -122,10 +124,10 @@
       const href = target.getAttribute('href') || '';
 
       if (LOGOUT_PATTERN.test(text) || LOGOUT_PATTERN.test(href) ||
-          href.includes('logout') || href.includes('Logout') ||
+        href.includes('logout') || href.includes('Logout') ||
           href.includes('Shibboleth.sso/Logout')) {
         // Tell background to set the bypass timestamp
-        chrome.runtime.sendMessage({ type: 'LOGOUT_DETECTED' });
+        ext.runtime.sendMessage({ type: 'LOGOUT_DETECTED' });
       }
     }, true); // capture phase — fires before navigation
   };
@@ -248,18 +250,34 @@
     toast.id = 'ethz-autologin-toast';
     toast.classList.add(type === 'error' ? 'toast-error' : 'toast-info');
 
-    let actionHtml = '';
-    if (action) {
-      actionHtml = `<button class="toast-action ${action.danger ? 'danger' : ''}" id="ethz-toast-action">${action.label}</button>`;
-    }
+    const header = document.createElement('div');
+    header.className = 'toast-header';
 
-    toast.innerHTML = `
-      <div class="toast-header">
-        <span class="toast-title">${title}</span>
-        <button class="toast-close" id="ethz-toast-close">×</button>
-      </div>
-      <div class="toast-body">${body}${actionHtml}</div>
-    `;
+    const titleEl = document.createElement('span');
+    titleEl.className = 'toast-title';
+    titleEl.textContent = title;
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'toast-close';
+    closeBtn.id = 'ethz-toast-close';
+    closeBtn.type = 'button';
+    closeBtn.textContent = '×';
+
+    const bodyEl = document.createElement('div');
+    bodyEl.className = 'toast-body';
+    bodyEl.textContent = body;
+
+    header.append(titleEl, closeBtn);
+    toast.append(header, bodyEl);
+
+    if (action) {
+      const actionBtn = document.createElement('button');
+      actionBtn.className = action.danger ? 'toast-action danger' : 'toast-action';
+      actionBtn.id = 'ethz-toast-action';
+      actionBtn.type = 'button';
+      actionBtn.textContent = action.label;
+      bodyEl.appendChild(actionBtn);
+    }
 
     document.documentElement.appendChild(toast);
 
@@ -277,7 +295,7 @@
   const openExtensionPopup = () => {
     showToast({
       title: 'ETHZ Auto-Login',
-      body: 'Click the extension icon <strong>(🔒 E)</strong> in your toolbar to add or update your credentials.',
+      body: 'Click the extension icon in your toolbar to add or update your credentials.',
       type: 'info'
     });
   };
@@ -319,11 +337,14 @@
     if (document.getElementById('ethz-autologin-overlay')) return;
     const overlay = document.createElement('div');
     overlay.id = 'ethz-autologin-overlay';
-    overlay.innerHTML = `
-      <style>${OVERLAY_CSS}</style>
-      <div class="ethz-spinner"></div>
-      <div class="ethz-label">Signing in to ETHZ…</div>
-    `;
+    const style = document.createElement('style');
+    style.textContent = OVERLAY_CSS;
+    const spinner = document.createElement('div');
+    spinner.className = 'ethz-spinner';
+    const label = document.createElement('div');
+    label.className = 'ethz-label';
+    label.textContent = 'Signing in to ETHZ…';
+    overlay.append(style, spinner, label);
     document.documentElement.appendChild(overlay);
 
     // Safety timeout: if login hasn't completed in 5s, remove overlay
@@ -340,10 +361,10 @@
     watchForLogout();
 
     // First check if we're in a post-logout bypass window (async, via background)
-    chrome.runtime.sendMessage({ type: 'CHECK_LOGOUT_BYPASS' }, (response) => {
+    ext.runtime.sendMessage({ type: 'CHECK_LOGOUT_BYPASS' }, (response) => {
       if (response?.bypassed) return; // User just logged out — don't auto-login
 
-      chrome.storage.local.get(
+      ext.storage.local.get(
         ['ethz_username', 'ethz_password', 'ethz_login_failed'],
         (result) => {
           const username = result.ethz_username;
@@ -355,7 +376,7 @@
           if (isIdpPage() && hasLoginForm()) {
 
             if (hasLoginError() && hasCreds) {
-              chrome.runtime.sendMessage({ type: 'LOGIN_FAILED' });
+              ext.runtime.sendMessage({ type: 'LOGIN_FAILED' });
               showToast({
                 title: 'Login failed',
                 body: 'Your saved ETHZ credentials appear to be incorrect. Update or remove them in the extension settings.',
@@ -456,12 +477,12 @@
           if (wayf && hasCreds && !previouslyFailed) {
             // Loop guard: check if we already submitted on this page recently
             const guardKey = 'ethz_wayf_guard_' + location.origin + location.pathname;
-            chrome.storage.session.get([guardKey], (guardResult) => {
+            ext.storage.session.get([guardKey], (guardResult) => {
               const lastSubmit = guardResult[guardKey] || 0;
               if (Date.now() - lastSubmit < 30000) return; // Already tried in last 30s — stop
 
               // Set guard before submitting
-              chrome.storage.session.set({ [guardKey]: Date.now() });
+              ext.storage.session.set({ [guardKey]: Date.now() });
 
               // Select ETH Zurich
               wayf.select.value = wayf.option.value;
@@ -489,7 +510,7 @@
 
           // ─── Normal ETHZ page — login succeeded ───
           if (hasCreds && !isIdpPage() && !isSamlPostBack() && !isShibbolethEndpoint()) {
-            chrome.runtime.sendMessage({ type: 'LOGIN_SUCCEEDED' });
+            ext.runtime.sendMessage({ type: 'LOGIN_SUCCEEDED' });
           }
         }
       );

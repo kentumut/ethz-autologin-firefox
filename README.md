@@ -1,6 +1,6 @@
 # ETHZ Auto-Login
 
-Chrome extension that automatically logs you into ETHZ websites (Shibboleth / SWITCH AAI). Entirely local — your credentials never leave your browser.
+Browser extension that automatically logs you into ETHZ websites (Shibboleth / SWITCH AAI). Entirely local — your credentials never leave your browser.
 
 ## Features
 
@@ -11,12 +11,51 @@ Chrome extension that automatically logs you into ETHZ websites (Shibboleth / SW
 - **First-install welcome** — guides new users to set up their credentials
 - **No-credentials nudge** — subtle notification on login pages if credentials haven't been configured yet
 
-## Install
+## Install in Chrome
 
 1. Clone or download this repo
 2. Open Chrome → `chrome://extensions`
 3. Enable **Developer mode** (top-right toggle)
 4. Click **Load unpacked** → select this folder
+
+Chrome uses `manifest.json` directly. This remains the primary Chrome manifest and uses a Manifest V3 background service worker.
+
+## Install in Firefox
+
+Firefox is built as a separate target so Chrome support is not replaced.
+
+1. Build the Firefox extension:
+   ```sh
+   npm run build:firefox
+   ```
+2. Open Firefox → `about:debugging#/runtime/this-firefox`
+3. Click **Load Temporary Add-on...**
+4. Select `dist/firefox/manifest.json`
+
+For development with Mozilla's tooling:
+
+```sh
+npm run run:firefox
+```
+
+To lint the Firefox build:
+
+```sh
+npm run lint:firefox
+```
+
+## Build Targets
+
+```sh
+npm run build:chrome
+npm run build:firefox
+npm run build
+```
+
+The build script writes browser-specific output to `dist/`:
+
+- `dist/chrome` uses the source `manifest.json`
+- `dist/firefox` uses `manifest.firefox.json` copied as `manifest.json`
 
 ## Usage
 
@@ -29,7 +68,7 @@ If your credentials are wrong, the extension will notify you and stop trying. Up
 
 ## Privacy & Security
 
-- Credentials stored **locally only** via `chrome.storage.local` (encrypted at rest by Chrome)
+- Credentials stored **locally only** via browser extension storage
 - No external network calls, analytics, or tracking
 - Auto-fill restricted to `aai-logon.ethz.ch` — a compromised ETHZ subdomain cannot extract your password
 - Passwords never displayed in plain text in the UI
@@ -39,11 +78,13 @@ If your credentials are wrong, the extension will notify you and stop trying. Up
 
 | File | Purpose |
 |------|---------|
-| `manifest.json` | Extension config (Manifest V3) |
+| `manifest.json` | Chrome extension config (Manifest V3 service worker) |
+| `manifest.firefox.json` | Firefox extension config (Manifest V3 background script) |
 | `background.js` | First-install handling, failure state management |
 | `content.js` | Login form detection, overlay, auto-fill, notifications |
 | `popup.html/css/js` | Settings UI for credentials |
 | `icons/` | Extension icons |
+| `scripts/build.js` | Browser-specific build output |
 
 ## License
 

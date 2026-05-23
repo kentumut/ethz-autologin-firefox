@@ -1,3 +1,12 @@
+const ext = globalThis.chrome || globalThis.browser;
+const isFirefox = navigator.userAgent.toLowerCase().includes('firefox');
+const passwordManagerUrl = isFirefox
+  ? 'about:logins?filter=ethz'
+  : 'chrome://password-manager/passwords?q=ethz';
+const passwordManagerName = isFirefox
+  ? 'Firefox Password Manager'
+  : 'Google Password Manager';
+
 const steps = [
   document.getElementById('step-1'),
   document.getElementById('step-2'),
@@ -7,7 +16,11 @@ const progress = document.getElementById('progress');
 const usernameInput = document.getElementById('username');
 const passwordInput = document.getElementById('password');
 const toggleBtn = document.getElementById('togglePassword');
+const passwordManagerLink = document.getElementById('pw-manager-link');
 let currentStep = 0;
+
+passwordManagerLink.href = passwordManagerUrl;
+passwordManagerLink.textContent = `Check ${passwordManagerName}`;
 
 const goTo = (index) => {
   steps[currentStep].classList.remove('active');
@@ -19,19 +32,19 @@ const goTo = (index) => {
   if (input) setTimeout(() => input.focus(), 100);
 };
 
-// Handle the chrome:// link
-document.getElementById('pw-manager-link').addEventListener('click', (e) => {
+// Handle internal browser password-manager links, which may not open directly.
+passwordManagerLink.addEventListener('click', (e) => {
   e.preventDefault();
   try {
-    chrome.tabs.create({ url: 'chrome://password-manager/passwords?q=ethz' });
+    ext.tabs.create({ url: passwordManagerUrl });
   } catch {
     const el = e.target;
     const originalText = el.textContent;
-    navigator.clipboard.writeText('chrome://password-manager/passwords?q=ethz').then(() => {
+    navigator.clipboard.writeText(passwordManagerUrl).then(() => {
       el.textContent = 'Link copied! Paste in a new tab.';
       setTimeout(() => { el.textContent = originalText; }, 3000);
     }).catch(() => {
-      el.textContent = 'Go to: chrome://password-manager/passwords?q=ethz';
+      el.textContent = `Go to: ${passwordManagerUrl}`;
       setTimeout(() => { el.textContent = originalText; }, 5000);
     });
   }
@@ -60,11 +73,11 @@ document.getElementById('next-2').addEventListener('click', () => {
   document.getElementById('error-2').textContent = '';
 
   const username = usernameInput.value.trim();
-  chrome.storage.local.set(
+  ext.storage.local.set(
     { ethz_username: username, ethz_password: pw },
     () => {
-      chrome.storage.local.remove(['ethz_show_welcome', 'ethz_login_failed']);
-      chrome.action.setBadgeText({ text: '' });
+      ext.storage.local.remove(['ethz_show_welcome', 'ethz_login_failed']);
+      ext.action.setBadgeText({ text: '' });
       goTo(2);
     }
   );

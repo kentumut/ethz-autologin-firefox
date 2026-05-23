@@ -1,3 +1,5 @@
+const ext = globalThis.chrome || globalThis.browser;
+
 const savedView = document.getElementById('saved-view');
 const editView = document.getElementById('edit-view');
 const statusEl = document.getElementById('status');
@@ -42,7 +44,7 @@ const showEditView = (prefillUsername = '') => {
 };
 
 const loadCredentials = () => {
-  chrome.storage.local.get(
+  ext.storage.local.get(
     ['ethz_username', 'ethz_password', 'ethz_login_failed'],
     (result) => {
       if (result.ethz_username && result.ethz_password) {
@@ -65,11 +67,11 @@ saveBtn.addEventListener('click', () => {
     return;
   }
 
-  chrome.storage.local.set(
+  ext.storage.local.set(
     { ethz_username: username, ethz_password: password },
     () => {
-      chrome.storage.local.remove(['ethz_login_failed']);
-      chrome.runtime.sendMessage({ type: 'CREDENTIALS_UPDATED' });
+      ext.storage.local.remove(['ethz_login_failed']);
+      ext.runtime.sendMessage({ type: 'CREDENTIALS_UPDATED' });
       showSavedView(username);
     }
   );
@@ -77,7 +79,7 @@ saveBtn.addEventListener('click', () => {
 
 // Change credentials — show form with username prefilled
 changeBtn.addEventListener('click', () => {
-  chrome.storage.local.get(['ethz_username'], (result) => {
+  ext.storage.local.get(['ethz_username'], (result) => {
     showEditView(result.ethz_username || '');
   });
 });
@@ -90,7 +92,7 @@ cancelBtn.addEventListener('click', () => {
 // Delete credentials
 deleteBtn.addEventListener('click', () => {
   if (!confirm('Delete saved ETHZ credentials?')) return;
-  chrome.storage.local.remove(
+  ext.storage.local.remove(
     ['ethz_username', 'ethz_password', 'ethz_login_failed'],
     () => showEditView()
   );

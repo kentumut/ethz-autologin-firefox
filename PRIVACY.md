@@ -6,10 +6,10 @@
 None. This extension does not collect, transmit, or store any data externally.
 
 ## What data is stored locally
-When you enter your ETHZ username and password in the extension, they are saved in `chrome.storage.local` — a browser storage mechanism that is:
-- Encrypted at rest by Chrome on most platforms
+When you enter your ETHZ username and password in the extension, they are saved in browser extension local storage — a browser-managed storage mechanism that is:
+- Stored locally by your browser
 - Sandboxed to this extension (no website or other extension can access it)
-- Never synced to your Google account
+- Not transmitted by this extension
 - Deleted when you uninstall the extension
 
 ## What the extension does with your credentials
