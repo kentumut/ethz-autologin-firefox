@@ -9,53 +9,64 @@
   const ext = globalThis.chrome || globalThis.browser;
 
   const ETH_IDP_VALUE = 'https://aai-logon.ethz.ch/idp/shibboleth';
+  const EXTENSION_STORAGE_MODE = 'extension_storage';
+
+  const isAutomationPaused = (pausedUntil) => Number(pausedUntil || 0) > Date.now();
 
   const run = () => {
-    // Only act if user has saved credentials
-    ext.storage.local.get(['ethz_username', 'ethz_password'], (result) => {
-      if (!result.ethz_username || !result.ethz_password) return;
+    // Only act after the user enables login automation.
+    ext.storage.local.get(
+      ['ethz_login_mode', 'ethz_username', 'ethz_password', 'ethz_password_manager_enabled', 'ethz_automation_paused_until'],
+      (result) => {
+        const enabled = result.ethz_login_mode ||
+          result.ethz_password_manager_enabled ||
+          (result.ethz_username && result.ethz_password);
+        if (!enabled) return;
+        if (result.ethz_login_mode === EXTENSION_STORAGE_MODE && !(result.ethz_username && result.ethz_password)) return;
+        if (isAutomationPaused(result.ethz_automation_paused_until)) return;
 
-      // Check for logout bypass
-      ext.runtime.sendMessage({ type: 'CHECK_LOGOUT_BYPASS' }, (response) => {
-        if (response?.bypassed) return;
+        // Check for logout bypass
+        ext.runtime.sendMessage({ type: 'CHECK_LOGOUT_BYPASS' }, (response) => {
+          if (response?.bypassed) return;
 
-        // Find the organisation select dropdown
-        const select = document.querySelector('select[name="user_idp"], select#userIdPSelection');
-        if (!select) return;
+          // Find the organisation select dropdown
+          const select = document.querySelector('select[name="user_idp"], select#userIdPSelection');
+          if (!select) return;
 
-        // Select ETH Zurich
-        const option = Array.from(select.options).find(
-          opt => opt.value === ETH_IDP_VALUE || opt.text.includes('ETH Zurich') || opt.text.includes('ETH Zürich')
-        );
+          // Select ETH Zurich
+          const option = Array.from(select.options).find(
+            opt => opt.value === ETH_IDP_VALUE || opt.text.includes('ETH Zurich') || opt.text.includes('ETH Zürich')
+          );
 
-        if (!option) return;
+          if (!option) return;
 
-        // Set the value
-        select.value = option.value;
-        select.dispatchEvent(new Event('change', { bubbles: true }));
+          // Set the value
+          select.value = option.value;
+          select.dispatchEvent(new Event('change', { bubbles: true }));
 
-        // Also fill the text search box if it exists (newer WAYF UI uses an IDD dropdown)
-        const searchBox = document.querySelector('input#userIdPSelection_iddtext, input.idd_textbox');
-        if (searchBox) {
-          searchBox.value = 'ETH Zurich';
-          searchBox.dispatchEvent(new Event('input', { bubbles: true }));
-          searchBox.dispatchEvent(new Event('change', { bubbles: true }));
-        }
+          // Also fill the text search box if it exists (newer WAYF UI uses an IDD dropdown)
+          const searchBox = document.querySelector('input#userIdPSelection_iddtext, input.idd_textbox');
+          if (searchBox) {
+            searchBox.value = 'ETH Zurich';
+            searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+            searchBox.dispatchEvent(new Event('change', { bubbles: true }));
+          }
 
-        // Show overlay
-        showOverlay();
+          // Show overlay
+          showOverlay();
 
-        // Click submit after short delay
-        const submitBtn =
-          document.querySelector('button[name="Select"]') ||
-          document.querySelector('button[type="submit"]') ||
-          document.querySelector('input[type="submit"]');
+          // Click submit after short delay
+          const submitBtn =
+            document.querySelector('button[name="Select"]') ||
+            document.querySelector('button[type="submit"]') ||
+            document.querySelector('input[type="submit"]');
 
-        if (submitBtn) {
-          setTimeout(() => submitBtn.click(), 400);
-        }
-      });
-    });
+          if (submitBtn) {
+            setTimeout(() => submitBtn.click(), 400);
+          }
+        });
+      }
+    );
   };
 
   // ── Overlay ──

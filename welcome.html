@@ -136,6 +136,29 @@
         color: #666;
       }
 
+      .setup-card {
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 18px;
+        margin-bottom: 20px;
+        background: #fff;
+        color: #555;
+        font-size: 14px;
+        line-height: 1.55;
+      }
+
+      .setup-card strong {
+        color: #1F407A;
+      }
+
+      .setup-card ol {
+        margin: 10px 0 0 20px;
+      }
+
+      .setup-card li {
+        margin-top: 6px;
+      }
+
       /* ── Buttons ── */
       .btn-row {
         display: flex;
@@ -283,40 +306,48 @@
 
       <!-- Step 1: Username -->
       <div class="step active" id="step-1">
-        <div class="step-number">1 → 3</div>
+        <div class="step-number">Setup</div>
         <h1>What's your <span>ETHZ username</span>?</h1>
         <p class="hint">
-          Your nethz username — the one you use to log into ETHZ services.
+          Before enabling ETHZ Auto-Login, save your ETHZ password in your browser's password manager. The extension uses the password that the browser fills on the login page.
         </p>
+        <div class="setup-card">
+          <strong>Save your password in browser passwords:</strong>
+          <ol>
+            <li>Open your browser password manager.</li>
+            <li>Add or update the login for <strong>aai-logon.ethz.ch</strong>.</li>
+            <li>Save your nethz username and ETHZ password there.</li>
+          </ol>
+        </div>
         <div class="input-group">
           <input id="username" type="text" placeholder="e.g. jsmith" autocomplete="username" autofocus />
         </div>
         <div class="input-error" id="error-1"></div>
         <div class="btn-row">
           <button class="btn btn-primary" id="next-1">Continue</button>
+          <button class="btn btn-skip pw-manager-link" type="button">Open password manager</button>
           <button class="btn btn-skip" id="skip-1">I'll do this later</button>
         </div>
         <p class="key-hint">Press <kbd>Enter ↵</kbd></p>
       </div>
 
-      <!-- Step 2: Password -->
+      <!-- Step 2: Password manager -->
       <div class="step" id="step-2">
-        <div class="step-number">2 → 3</div>
-        <h1>And your <span>password</span>?</h1>
+        <div class="step-number">Browser passwords</div>
+        <h1>Save it in your <span>password manager</span>.</h1>
         <p class="hint">
-          Stored locally in your browser — never sent anywhere.<br>
-          Can't remember it? <a href="#" id="pw-manager-link">Check your browser password manager</a>.
+          Save your ETHZ password in your browser passwords first. The extension uses the password your browser password manager fills, then continues the login automatically.
         </p>
-        <div class="input-group">
-          <input id="password" type="password" placeholder="Your ETHZ password" autocomplete="off" />
-          <button class="toggle-pw" id="togglePassword" type="button" aria-label="Show password">👁</button>
+        <div class="setup-card">
+          Use <strong>aai-logon.ethz.ch</strong> as the saved login site. If browser password manager autofill is disabled, you can optionally store the password in this extension from the popup.
         </div>
         <div class="input-error" id="error-2"></div>
         <div class="btn-row">
-          <button class="btn btn-primary" id="next-2">Save credentials</button>
+          <button class="btn btn-primary" id="next-2">I've saved it</button>
+          <button class="btn btn-skip pw-manager-link" type="button">Open password manager</button>
           <button class="btn btn-skip" id="skip-2">I'll do this later</button>
         </div>
-        <p class="key-hint">Press <kbd>Enter ↵</kbd></p>
+        <p class="key-hint">Press <kbd>Enter ↵</kbd> when ready</p>
         <p class="step-footer">
           <a href="https://github.com/AlfredJustus/ethz-autologin" target="_blank" rel="noopener" class="github-link">
             <svg class="github-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
@@ -336,7 +367,7 @@
         <div class="done-features">
           <div class="feat">
             <span class="icon">🔐</span>
-            <span>Everything stays <strong>local</strong> — your credentials never leave this browser</span>
+            <span>Uses the password filled by your browser password manager; extension password storage is optional</span>
           </div>
           <div class="feat">
             <span class="icon">⚡</span>
@@ -344,7 +375,7 @@
           </div>
           <div class="feat">
             <span class="icon">⚙️</span>
-            <span>Change or remove credentials anytime from the extension icon</span>
+            <span>Pause automation anytime from the extension icon</span>
           </div>
         </div>
 

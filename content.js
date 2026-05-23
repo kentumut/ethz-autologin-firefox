@@ -1,6 +1,6 @@
 // ETHZ Auto-Login content script
 // Shows a seamless overlay during the Shibboleth redirect chain,
-// auto-fills credentials ONLY on the trusted IdP domain,
+// waits for password-manager autofill or fills opt-in stored credentials on trusted login domains,
 // detects login failures, respects manual logout, and shows contextual notifications.
 
 (() => {
@@ -8,10 +8,14 @@
 
   const ext = globalThis.chrome || globalThis.browser;
   const sessionStorage = ext.storage.session || ext.storage.local;
+  const AUTOFILL_WAIT_MS = 5000;
+  const AUTOFILL_POLL_MS = 150;
   const EMBEDDED_WAYF_RETRY_MS = 3000;
   const EMBEDDED_WAYF_RETRY_INTERVAL_MS = 150;
+  const PASSWORD_MANAGER_MODE = 'password_manager';
+  const EXTENSION_STORAGE_MODE = 'extension_storage';
 
-  // ── Security: only auto-fill on the actual ETHZ Identity Provider ──
+  // ── Security: only auto-submit after browser autofill on the actual ETHZ Identity Provider ──
   const TRUSTED_IDP_HOSTS = ['aai-logon.ethz.ch'];
 
   const USERNAME_SELECTORS = [
@@ -219,8 +223,8 @@
   };
 
   // ── GitLab LDAP login detection ──
-  // gitlab.inf.ethz.ch uses LDAP auth (not Shibboleth). Same ETHZ credentials,
-  // different form. Only auto-fill on this specific trusted host.
+  // gitlab.inf.ethz.ch uses LDAP auth (not Shibboleth). Same ETHZ password-manager
+  // entry, different form. Only auto-submit on this specific trusted host.
   const TRUSTED_LDAP_HOSTS = ['gitlab.inf.ethz.ch'];
 
   const isLdapLoginPage = () => {
@@ -244,7 +248,7 @@
     return !!(u && p);
   };
 
-  const dispatchInputEvents = (el) => {
+  const dispatchFieldEvents = (el) => {
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
   };
@@ -459,7 +463,7 @@
   const openExtensionPopup = () => {
     showToast({
       title: 'ETHZ Auto-Login',
-      body: 'Click the extension icon in your toolbar to add or update your credentials.',
+      body: 'Click the extension icon in your toolbar to update setup or pause automation.',
       type: 'info'
     });
   };
@@ -519,34 +523,126 @@
     }, 5000);
   };
 
+  const isAutomationPaused = (pausedUntil) => Number(pausedUntil || 0) > Date.now();
+
+  const showPasswordManagerPrompt = () => {
+    showToast({
+      title: 'Password manager needed',
+      body: 'Use your browser password manager to fill your ETHZ username and password on this page. ETHZ Auto-Login does not store your password in password-manager mode.',
+      type: 'info'
+    });
+  };
+
+  const waitForAutofillAndSubmit = ({ userField, passField, submitButton }) => {
+    if (!userField || !passField || !submitButton) return;
+
+    let intervalId = null;
+    let timeoutId = null;
+    let settled = false;
+
+    const cleanup = () => {
+      if (intervalId) clearInterval(intervalId);
+      if (timeoutId) clearTimeout(timeoutId);
+      userField.removeEventListener('input', trySubmit);
+      userField.removeEventListener('change', trySubmit);
+      passField.removeEventListener('input', trySubmit);
+      passField.removeEventListener('change', trySubmit);
+    };
+
+    function trySubmit() {
+      if (settled) return;
+      if (!userField.value.trim() || !passField.value) return;
+
+      dispatchFieldEvents(userField);
+      dispatchFieldEvents(passField);
+      if (submitButton.disabled) return;
+
+      settled = true;
+      cleanup();
+      showOverlay();
+      setTimeout(() => submitButton.click(), 300);
+    }
+
+    const handleTimeout = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      showPasswordManagerPrompt();
+    };
+
+    userField.addEventListener('input', trySubmit);
+    userField.addEventListener('change', trySubmit);
+    passField.addEventListener('input', trySubmit);
+    passField.addEventListener('change', trySubmit);
+    intervalId = setInterval(trySubmit, AUTOFILL_POLL_MS);
+    timeoutId = setTimeout(handleTimeout, AUTOFILL_WAIT_MS);
+    trySubmit();
+  };
+
+  const fillAndSubmitStoredCredentials = ({ userField, passField, submitButton, username, password }) => {
+    if (!userField || !passField || !submitButton || !username || !password) return;
+
+    showOverlay();
+    userField.value = username;
+    passField.value = password;
+    dispatchFieldEvents(userField);
+    dispatchFieldEvents(passField);
+
+    if (!submitButton.disabled) {
+      setTimeout(() => submitButton.click(), 300);
+    }
+  };
+
+  const getLoginMode = (result) => {
+    if (result.ethz_login_mode) return result.ethz_login_mode;
+    if (result.ethz_username && result.ethz_password) return EXTENSION_STORAGE_MODE;
+    if (result.ethz_password_manager_enabled) return PASSWORD_MANAGER_MODE;
+    return null;
+  };
+
   // ── Main logic ──
   const run = () => {
     // Always watch for logout clicks on any ETHZ page
     watchForLogout();
 
-    // First check if we're in a post-logout bypass window (async, via background)
-    ext.runtime.sendMessage({ type: 'CHECK_LOGOUT_BYPASS' }, (response) => {
-      if (response?.bypassed) return; // User just logged out — don't auto-login
+    ext.storage.local.get(
+      ['ethz_login_mode', 'ethz_username', 'ethz_password', 'ethz_password_manager_enabled', 'ethz_login_failed', 'ethz_automation_paused_until'],
+      (result) => {
+        const loginMode = getLoginMode(result);
+        const usesStoredCredentials = loginMode === EXTENSION_STORAGE_MODE;
+        const enabled = loginMode === PASSWORD_MANAGER_MODE ||
+          (usesStoredCredentials && !!(result.ethz_username && result.ethz_password));
+        const previouslyFailed = !!result.ethz_login_failed;
 
-      ext.storage.local.get(
-        ['ethz_username', 'ethz_password', 'ethz_login_failed'],
-        (result) => {
-          const username = result.ethz_username;
-          const password = result.ethz_password;
-          const hasCreds = !!(username && password);
-          const previouslyFailed = !!result.ethz_login_failed;
+        if (isAutomationPaused(result.ethz_automation_paused_until)) return;
+
+        if (!enabled) {
+          if ((isIdpPage() && hasLoginForm()) || isLdapLoginPage()) {
+            showToast({
+              title: 'ETHZ Auto-Login',
+              body: 'Click the extension icon to enable login automation.',
+              type: 'info'
+            });
+          }
+          return;
+        }
+
+        // First check if we're in a post-logout bypass window (async, via background)
+        ext.runtime.sendMessage({ type: 'CHECK_LOGOUT_BYPASS' }, (response) => {
+          if (response?.bypassed) return; // User just logged out — don't auto-login
 
           // ─── IdP login page ───
           if (isIdpPage() && hasLoginForm()) {
-
-            if (hasLoginError() && hasCreds) {
+            if (hasLoginError()) {
               ext.runtime.sendMessage({ type: 'LOGIN_FAILED' });
               showToast({
                 title: 'Login failed',
-                body: 'Your saved ETHZ credentials appear to be incorrect. Update or remove them in the extension settings.',
+                body: usesStoredCredentials
+                  ? 'The stored ETHZ login did not work. Update or remove it in the extension popup.'
+                  : 'The browser-filled ETHZ login did not work. Update the saved login in your browser password manager.',
                 type: 'error',
                 action: {
-                  label: 'Update credentials',
+                  label: 'Open setup',
                   danger: true,
                   onClick: openExtensionPopup
                 }
@@ -557,10 +653,12 @@
             if (previouslyFailed) {
               showToast({
                 title: 'Auto-login paused',
-                body: 'A previous login attempt failed. Update your credentials in the extension to try again.',
+                body: usesStoredCredentials
+                  ? 'A previous login attempt failed. Update the stored credentials in the extension popup to try again.'
+                  : 'A previous login attempt failed. Update your browser password manager entry, then open the extension popup to resume setup.',
                 type: 'error',
                 action: {
-                  label: 'Update credentials',
+                  label: 'Open setup',
                   danger: true,
                   onClick: openExtensionPopup
                 }
@@ -568,29 +666,20 @@
               return;
             }
 
-            if (!hasCreds) {
-              showToast({
-                title: 'ETHZ Auto-Login',
-                body: 'You haven\'t set up your login credentials yet. Click the extension icon to add them and skip this page next time.',
-                type: 'info'
+            const userField = findFirstMatch(USERNAME_SELECTORS);
+            const passField = findFirstMatch(PASSWORD_SELECTORS);
+            const submitButton = findSubmitButton();
+
+            if (usesStoredCredentials) {
+              fillAndSubmitStoredCredentials({
+                userField,
+                passField,
+                submitButton,
+                username: result.ethz_username,
+                password: result.ethz_password
               });
-              return;
-            }
-
-            // Happy path: overlay + fill + submit
-            showOverlay();
-
-            const u = findFirstMatch(USERNAME_SELECTORS);
-            const p = findFirstMatch(PASSWORD_SELECTORS);
-
-            u.value = username;
-            p.value = password;
-            dispatchInputEvents(u);
-            dispatchInputEvents(p);
-
-            const btn = findSubmitButton();
-            if (btn) {
-              setTimeout(() => btn.click(), 300);
+            } else {
+              waitForAutofillAndSubmit({ userField, passField, submitButton });
             }
             return;
           }
@@ -598,7 +687,7 @@
           // ─── SAML POST-back pages ───
           // These are hidden forms with SAMLResponse/SAMLRequest that need a click to continue.
           // Only click submit if the form actually contains SAML data (not random login pages).
-          if (isSamlPostBack() && hasCreds && !previouslyFailed) {
+          if (isSamlPostBack() && !previouslyFailed) {
             const samlForm =
               document.querySelector('form:has(input[name="SAMLResponse"])') ||
               document.querySelector('form:has(input[name="SAMLRequest"])');
@@ -612,24 +701,22 @@
           }
 
           // ─── GitLab LDAP login ───
-          if (isLdapLoginPage() && hasCreds && !previouslyFailed) {
+          if (isLdapLoginPage() && !previouslyFailed) {
             const userField = document.querySelector('input#ldapmain_username, input[name="username"][id*="ldap"]');
             const passField = document.querySelector('input#ldapmain_password, input[name="password"][id*="ldap"]');
+            const ldapForm = userField?.closest('form');
+            const submitBtn = ldapForm?.querySelector('button[type="submit"], input[type="submit"]');
 
-            if (userField && passField) {
-              showOverlay();
-
-              userField.value = username;
-              passField.value = password;
-              dispatchInputEvents(userField);
-              dispatchInputEvents(passField);
-
-              // Find the LDAP form's submit button (not the standard GitLab login)
-              const ldapForm = userField.closest('form');
-              const submitBtn = ldapForm?.querySelector('button[type="submit"], input[type="submit"]');
-              if (submitBtn) {
-                setTimeout(() => submitBtn.click(), 300);
-              }
+            if (usesStoredCredentials) {
+              fillAndSubmitStoredCredentials({
+                userField,
+                passField,
+                submitButton: submitBtn,
+                username: result.ethz_username,
+                password: result.ethz_password
+              });
+            } else {
+              waitForAutofillAndSubmit({ userField, passField, submitButton: submitBtn });
             }
             return;
           }
@@ -642,12 +729,12 @@
           }
 
           // ─── Normal ETHZ page — login succeeded ───
-          if (hasCreds && !isIdpPage() && !isSamlPostBack() && !isShibbolethEndpoint()) {
+          if (!isIdpPage() && !isSamlPostBack() && !isShibbolethEndpoint()) {
             ext.runtime.sendMessage({ type: 'LOGIN_SUCCEEDED' });
           }
-        }
-      );
-    });
+        });
+      }
+    );
   };
 
   run();

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "ETHZ Auto-Login",
-  "version": "2.0.0",
-  "description": "Automatically logs you into ETHZ websites using stored credentials",
+  "version": "3.0",
+  "description": "Automatically continues ETHZ login flows with browser-saved passwords or opt-in stored credentials",
   "permissions": ["storage"],
   "host_permissions": [
     "*://*.ethz.ch/*",

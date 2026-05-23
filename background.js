@@ -4,8 +4,33 @@
 const ext = globalThis.chrome || globalThis.browser;
 const sessionStorage = ext.storage.session || ext.storage.local;
 
+const migrateLoginMode = () => {
+  ext.storage.local.get(
+    ['ethz_login_mode', 'ethz_password', 'ethz_username', 'ethz_password_manager_enabled'],
+    (result) => {
+      if (result.ethz_login_mode) return;
+
+      const updates = {};
+      if (result.ethz_username && result.ethz_password) {
+        updates.ethz_login_mode = 'extension_storage';
+      } else if (result.ethz_password_manager_enabled) {
+        updates.ethz_login_mode = 'password_manager';
+        updates.ethz_password_manager_enabled = true;
+      }
+
+      if (Object.keys(updates).length > 0) {
+        ext.storage.local.set(updates);
+      }
+    }
+  );
+};
+
+migrateLoginMode();
+
 // Open the welcome/setup page on first install
 ext.runtime.onInstalled.addListener((details) => {
+  migrateLoginMode();
+
   if (details.reason === 'install') {
     ext.tabs.create({ url: ext.runtime.getURL('welcome.html') });
   }

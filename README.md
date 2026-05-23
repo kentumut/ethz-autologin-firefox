@@ -1,15 +1,16 @@
 # ETHZ Auto-Login
 
-Browser extension that automatically logs you into ETHZ websites (Shibboleth / SWITCH AAI). Entirely local — your credentials never leave your browser.
+Browser extension that automatically continues ETHZ login flows (Shibboleth / SWITCH AAI). Save your ETHZ password in your browser passwords first; by default the extension uses the password filled by the browser password manager. If browser password manager autofill is disabled, users can optionally store credentials in the extension for fully automatic login.
 
 ## Features
 
 - **Auto-login** on any `*.ethz.ch` site that uses Shibboleth SSO (Moodle, video.ethz.ch, etc.)
 - **Seamless redirect** — clean spinner overlay while the SSO chain completes, no page flashing
-- **Security first** — credentials only auto-filled on the trusted IdP (`aai-logon.ethz.ch`), never on arbitrary subdomains
-- **Smart failure handling** — detects wrong credentials, shows a notification, and stops (no infinite retry loops)
-- **First-install welcome** — guides new users to set up their credentials
-- **No-credentials nudge** — subtle notification on login pages if credentials haven't been configured yet
+- **Security first by default** — password-manager mode uses browser-saved passwords and avoids extension password storage
+- **Optional convenience mode** — users can explicitly store ETHZ credentials in extension local storage if browser password manager autofill is disabled
+- **Smart failure handling** — detects failed browser-filled logins, shows a notification, and stops (no infinite retry loops)
+- **First-install welcome** — guides new users to enable password-manager automation
+- **Pause control** — disable all automation for 15 minutes from the popup
 
 ## Install in Chrome
 
@@ -97,9 +98,9 @@ Unsigned packages are useful for inspection, but normal Firefox release builds r
 Suggested reviewer notes for unlisted signing:
 
 ```text
-ETHZ Auto-Login stores the user's ETHZ username and password locally in browser extension storage.
+ETHZ Auto-Login stores setup state such as the ETHZ username, login mode, and temporary pause/failure flags. By default, the password comes from the browser password manager autofill on the login page. If the user explicitly chooses extension storage mode, it also stores the ETHZ password in extension local storage.
 The extension does not make analytics, telemetry, API, or other outbound network requests.
-Credentials are only filled on the trusted ETHZ IdP host aai-logon.ethz.ch and LDAP login on gitlab.inf.ethz.ch.
+In password-manager mode, passwords are saved in the browser password manager and are not stored by the extension. In extension-storage mode, login forms on aai-logon.ethz.ch and gitlab.inf.ethz.ch are filled from extension local storage.
 The wayf.switch.ch content script only selects ETH Zurich as the identity provider.
 Build command: npm run build:firefox
 Firefox source directory for review/signing: dist/firefox
@@ -124,18 +125,20 @@ The build script writes browser-specific output to `dist/`:
 ## Usage
 
 1. Click the extension icon in your toolbar
-2. Enter your ETH username and password
-3. Click **Save**
-4. Visit any ETHZ site — login happens automatically
+2. Enter your ETH username
+3. Choose **Password manager** to use the password saved in your browser passwords, or **Store in extension** if browser password manager autofill is disabled
+4. Click **Enable**
+5. Visit any ETHZ site - the extension redirects/selects ETH Zurich and completes the login according to the selected mode
 
-If your credentials are wrong, the extension will notify you and stop trying. Update your credentials in the popup to try again.
+If login fails, the extension will notify you and stop trying. Update the saved browser login or the stored extension credentials, then reopen the popup to resume setup. Use **Pause for 15 minutes** to temporarily disable all redirect and submit automation.
 
 ## Privacy & Security
 
-- Credentials stored **locally only** via browser extension storage
+- Password-manager mode uses the password saved in browser passwords and does **not** store passwords in browser extension storage
+- Extension-storage mode optionally stores the ETHZ password locally in this extension for convenience when browser password manager autofill is disabled
+- Stored extension credentials are recoverable by someone with local extension/profile access
 - No external network calls, analytics, or tracking
-- Auto-fill restricted to `aai-logon.ethz.ch` — a compromised ETHZ subdomain cannot extract your password
-- Passwords never displayed in plain text in the UI
+- Auto-submit restricted to `aai-logon.ethz.ch` and `gitlab.inf.ethz.ch`
 - 100% open source — read every line of code
 
 ## Files
@@ -145,8 +148,8 @@ If your credentials are wrong, the extension will notify you and stop trying. Up
 | `manifest.json` | Chrome extension config (Manifest V3 service worker) |
 | `manifest.firefox.json` | Firefox extension config (Manifest V3 background script) |
 | `background.js` | First-install handling, failure state management |
-| `content.js` | Login form detection, overlay, auto-fill, notifications |
-| `popup.html/css/js` | Settings UI for credentials |
+| `content.js` | Login flow detection, overlay, autofill wait, auto-submit, notifications |
+| `popup.html/css/js` | Settings UI for login mode, credentials, and pause control |
 | `icons/` | Extension icons |
 | `scripts/build.js` | Browser-specific build output |
 
