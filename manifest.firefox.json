@@ -9,7 +9,7 @@
     "*://wayf.switch.ch/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "scripts": ["background.js"]
   },
   "action": {
     "default_popup": "popup.html",
@@ -36,5 +36,14 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png",
     "256": "icons/icon256.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "ethz-autologin@example.local",
+      "strict_min_version": "142.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
   }
 }

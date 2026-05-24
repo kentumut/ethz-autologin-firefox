@@ -12,20 +12,37 @@
         <h1>ETHZ Auto-Login</h1>
       </header>
 
-      <!-- Saved state: shows status + actions, no form -->
+      <!-- Enabled state: shows status + actions, no password form -->
       <div id="saved-view" style="display: none;">
-        <div id="status" class="status status-ok">✓ Credentials saved</div>
-        <p class="saved-user">Logged in as <strong id="saved-username"></strong></p>
+        <div id="status" class="status status-ok">Automation active</div>
+        <p class="saved-user"><span id="saved-mode"></span> for <strong id="saved-username"></strong></p>
         <div class="saved-actions">
-          <button id="changeBtn" class="btn-link" type="button">Change credentials</button>
+          <button id="changeBtn" class="btn-link" type="button">Change setup</button>
           <span class="dot">·</span>
-          <button id="deleteBtn" class="btn-link danger" type="button">Remove</button>
+          <button id="deleteBtn" class="btn-link danger" type="button">Disable</button>
         </div>
       </div>
 
-      <!-- Edit state: credential form -->
+      <!-- Edit state: setup form -->
       <div id="edit-view" style="display: none;">
-        <div id="edit-status" class="status status-empty">Enter your ETHZ credentials</div>
+        <div id="edit-status" class="status status-empty">Use your browser password manager</div>
+
+        <div class="mode-group" role="radiogroup" aria-label="Login mode">
+          <label class="mode-option">
+            <input id="modePasswordManager" name="loginMode" type="radio" value="password_manager" checked />
+            <span>
+              <strong>Password manager</strong>
+              <small>Use the password saved in browser passwords.</small>
+            </span>
+          </label>
+          <label class="mode-option">
+            <input id="modeExtensionStorage" name="loginMode" type="radio" value="extension_storage" />
+            <span>
+              <strong>Store in extension</strong>
+              <small>Optional when browser password manager autofill is disabled.</small>
+            </span>
+          </label>
+        </div>
 
         <div class="field">
           <label for="username">Username</label>
@@ -37,29 +54,34 @@
           />
         </div>
 
-        <div class="field">
+        <div id="password-field" class="field" style="display: none;">
           <label for="password">Password</label>
           <div class="password-wrapper">
             <input
               id="password"
               type="password"
-              placeholder="Password"
+              placeholder="ETHZ password"
               autocomplete="off"
             />
-            <button id="togglePassword" class="toggle" type="button" aria-label="Show password">
-              👁
-            </button>
+            <button id="togglePassword" class="toggle" type="button" aria-label="Show password">Show</button>
           </div>
         </div>
 
+        <p id="mode-helper" class="helper"></p>
+
         <div class="actions">
-          <button id="saveBtn" class="btn primary" type="button">Save</button>
+          <button id="saveBtn" class="btn primary" type="button">Enable</button>
           <button id="cancelBtn" class="btn secondary" type="button">Cancel</button>
         </div>
       </div>
 
+      <div id="pause-view" class="pause-view" style="display: none;">
+        <button id="pauseBtn" class="btn secondary" type="button">Pause for 15 minutes</button>
+        <p id="pause-status" class="pause-status"></p>
+      </div>
+
       <footer class="footer">
-        Credentials stored locally only · <a href="https://github.com/AlfredJustus/ethz-autologin" target="_blank" rel="noopener">GitHub</a>
+        Uses browser-saved passwords by default; extension storage is optional · <a href="https://github.com/AlfredJustus/ethz-autologin" target="_blank" rel="noopener">GitHub</a>
       </footer>
     </div>
 

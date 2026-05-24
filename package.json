@@ -1,0 +1,17 @@
+{
+  "name": "ethz-autologin",
+  "private": true,
+  "scripts": {
+    "build": "npm run build:chrome && npm run build:firefox",
+    "build:chrome": "node scripts/build.js chrome",
+    "build:firefox": "node scripts/build.js firefox",
+    "lint:firefox": "npm run build:firefox && web-ext lint --source-dir dist/firefox",
+    "package:firefox": "npm run build:firefox && web-ext build --source-dir dist/firefox --artifacts-dir artifacts/firefox --overwrite-dest",
+    "run:firefox": "npm run build:firefox && web-ext run --source-dir dist/firefox",
+    "sign:firefox": "npm run build:firefox && node --env-file=.env scripts/check-firefox-sign-env.js && node --env-file=.env ./node_modules/web-ext/bin/web-ext.js sign --source-dir dist/firefox --artifacts-dir artifacts/firefox-signed --channel unlisted",
+    "submit:firefox:listed": "npm run build:firefox && node --env-file=.env scripts/check-firefox-sign-env.js && node --env-file=.env ./node_modules/web-ext/bin/web-ext.js sign --source-dir dist/firefox --artifacts-dir artifacts/firefox-listed --channel listed --amo-metadata amo-metadata.json"
+  },
+  "devDependencies": {
+    "web-ext": "^10.2.0"
+  }
+}

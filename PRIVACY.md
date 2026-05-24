@@ -6,25 +6,34 @@
 None. This extension does not collect, transmit, or store any data externally.
 
 ## What data is stored locally
-When you enter your ETHZ username and password in the extension, they are saved in `chrome.storage.local` — a browser storage mechanism that is:
-- Encrypted at rest by Chrome on most platforms
+By default, this extension does **not** store your ETHZ password. Save your ETHZ password in your browser passwords; the extension uses the password that your browser password manager fills on the login page.
+
+The extension stores setup and automation state in browser extension local storage:
+- ETHZ username, if you enter it during setup
+- Selected login mode
+- Temporary pause and failed-login flags
+
+If browser password manager autofill is disabled and you explicitly select **Store in extension**, the extension also stores your ETHZ password in extension local storage so it can fill the login form automatically.
+
+Extension local storage is:
+- Stored locally by your browser profile
 - Sandboxed to this extension (no website or other extension can access it)
-- Never synced to your Google account
+- Not transmitted by this extension
 - Deleted when you uninstall the extension
 
-## What the extension does with your credentials
-Your credentials are used exclusively to auto-fill login forms on ETHZ websites. Specifically:
-- **Shibboleth login forms** on `aai-logon.ethz.ch` (the official ETHZ identity provider)
-- **LDAP login forms** on `gitlab.inf.ethz.ch`
+## What the extension does with login pages
+The extension helps with ETHZ login flows locally:
+- **Shibboleth login forms** on `aai-logon.ethz.ch`: uses the password filled by the browser password manager or fills explicitly stored extension credentials, then submits
+- **LDAP login forms** on `gitlab.inf.ethz.ch`: uses the password filled by the browser password manager or fills explicitly stored extension credentials, then submits
 - **WAYF organisation selection** on `wayf.switch.ch` and embedded org pickers on ETHZ sites
 
-The extension fills form fields and clicks the submit button. That's it.
+The extension does not fetch or decrypt passwords from the browser password manager; it only uses the values the browser autofills into the login form.
 
 ## What we do NOT do
 - ❌ Send your credentials to any server
 - ❌ Log, track, or record your browsing activity
 - ❌ Use analytics, telemetry, or tracking pixels
-- ❌ Store your password in plain text
+- ❌ Store your password unless you explicitly select extension-storage mode
 - ❌ Access any website outside `*.ethz.ch` and `wayf.switch.ch`
 - ❌ Share data with any third party
 
@@ -34,8 +43,8 @@ This extension makes **zero** network requests. It does not contact any external
 ## Permissions explained
 | Permission | Why |
 |---|---|
-| `storage` | Save your credentials locally |
-| `*://*.ethz.ch/*` | Detect and fill login forms on ETHZ sites |
+| `storage` | Save local setup, pause, failure state, and optional extension-stored credentials |
+| `*://*.ethz.ch/*` | Detect ETHZ login flows and submit after browser autofill or opt-in extension fill |
 | `*://wayf.switch.ch/*` | Auto-select ETH Zurich on the SWITCH AAI org picker |
 
 ## Open source

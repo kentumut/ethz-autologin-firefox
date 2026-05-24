@@ -1,12 +1,21 @@
 // ETHZ Auto-Login content script
 // Shows a seamless overlay during the Shibboleth redirect chain,
-// auto-fills credentials ONLY on the trusted IdP domain,
+// waits for password-manager autofill or fills opt-in stored credentials on trusted login domains,
 // detects login failures, respects manual logout, and shows contextual notifications.
 
 (() => {
   'use strict';
 
-  // ── Security: only auto-fill on the actual ETHZ Identity Provider ──
+  const ext = globalThis.chrome || globalThis.browser;
+  const sessionStorage = ext.storage.session || ext.storage.local;
+  const AUTOFILL_WAIT_MS = 5000;
+  const AUTOFILL_POLL_MS = 150;
+  const EMBEDDED_WAYF_RETRY_MS = 3000;
+  const EMBEDDED_WAYF_RETRY_INTERVAL_MS = 150;
+  const PASSWORD_MANAGER_MODE = 'password_manager';
+  const EXTENSION_STORAGE_MODE = 'extension_storage';
+
+  // ── Security: only auto-submit after browser autofill on the actual ETHZ Identity Provider ──
   const TRUSTED_IDP_HOSTS = ['aai-logon.ethz.ch'];
 
   const USERNAME_SELECTORS = [
@@ -41,20 +50,181 @@
   // Detects embedded WAYF / org-selection pages (e.g., Moodle's /auth/shibboleth/login.php).
   // These have a dropdown to select your institution before triggering the SSO flow.
   const ETH_IDP_VALUE = 'https://aai-logon.ethz.ch/idp/shibboleth';
+  const ETH_IDP_TEXT = /ETH Z(u|ü)rich/i;
+  const submittedWayfPages = new Set();
 
-  const getEmbeddedWayfSelect = () => {
-    // Moodle uses select[name="idp"], WAYF uses select[name="user_idp"]
-    const select = document.querySelector('select[name="user_idp"], select#userIdPSelection, select[name="idp"], select#idp');
-    if (!select) return null;
-    const option = Array.from(select.options).find(
-      opt => opt.value === ETH_IDP_VALUE || /ETH Z(u|ü)rich/i.test(opt.text)
-    );
-    return option ? { select, option } : null;
+  const isEthIdpValue = (value) =>
+    (value || '').includes(ETH_IDP_VALUE) || ETH_IDP_TEXT.test(value || '');
+
+  const isHiddenIdpField = (input) =>
+    /idp|entityid|entity_id|provider/i.test(`${input.name || ''} ${input.id || ''}`);
+
+  const findEthIdpOption = (select) => {
+    const options = Array.from(select.options);
+    return options.find((opt) => opt.value === ETH_IDP_VALUE) ||
+      options.find((opt) => isEthIdpValue(opt.value) || isEthIdpValue(opt.text));
+  };
+
+  const getEmbeddedWayfControl = () => {
+    const selectSelectors = [
+      'form#login select#idp[name="idp"]',
+      'form#login select[name="idp"]',
+      'select[name="user_idp"]',
+      'select#userIdPSelection',
+      'select[name="idp"]',
+      'select#idp'
+    ];
+
+    for (const selector of selectSelectors) {
+      const select = document.querySelector(selector);
+      if (!select) continue;
+
+      const option = findEthIdpOption(select);
+      if (option) {
+        return { control: select, form: select.closest('form'), option };
+      }
+    }
+
+    const textInput = Array.from(
+      document.querySelectorAll('input#userIdPSelection_iddtext, input.idd_textbox, input[name="idp"], input[name="user_idp"]')
+    ).find((input) => input.type !== 'hidden' && isEthIdpValue(input.value));
+    if (textInput) return { control: textInput, form: textInput.closest('form') };
+
+    const hiddenInput = Array.from(
+      document.querySelectorAll('input[type="hidden"]')
+    ).find((input) => isHiddenIdpField(input) && isEthIdpValue(input.value));
+    if (hiddenInput) return { control: hiddenInput, form: hiddenInput.closest('form') };
+
+    return null;
+  };
+
+  const getActionText = (el) => {
+    if (!el) return '';
+    if (el.tagName === 'INPUT') return el.value || el.name || '';
+    return `${el.textContent || ''} ${el.getAttribute('aria-label') || ''} ${el.name || ''}`;
+  };
+
+  const isPotentialEmbeddedWayfPage = () =>
+    location.pathname.includes('/auth/shibboleth/login.php') ||
+    !!document.querySelector('form#login select#idp[name="idp"], select[name="user_idp"], select#userIdPSelection, select[name="idp"], select#idp, input#userIdPSelection_iddtext, input.idd_textbox');
+
+  const findWayfSubmitButton = (form) => {
+    if (!form) return null;
+
+    const selectors = [
+      'button[name="Select"]',
+      'input[name="Select"]',
+      'button[type="submit"]',
+      'input[type="submit"]',
+      'button',
+      'input[type="button"]'
+    ];
+    const pattern = /select|continue|weiter|fortfahren|auswahl|wählen/i;
+
+    const findIn = (root, includeGenericText) => {
+      if (!root) return null;
+      const candidates = selectors.flatMap((selector) => Array.from(root.querySelectorAll(selector)));
+      return candidates.find((el) => {
+        if (el.disabled) return false;
+        if (el.matches('button[name="Select"], input[name="Select"], button[type="submit"], input[type="submit"]')) {
+          return true;
+        }
+        return includeGenericText && pattern.test(getActionText(el));
+      }) || null;
+    };
+
+    return findIn(form, true);
+  };
+
+  const submitWayfForm = (form, submitBtn) => {
+    try {
+      if (form && typeof form.requestSubmit === 'function') {
+        form.requestSubmit(submitBtn || undefined);
+        return;
+      }
+    } catch (_) {
+      // Fall back to the explicit click path for non-submit controls.
+    }
+
+    submitBtn?.click();
+  };
+
+  const submitEmbeddedWayf = (wayf) => {
+    const guardKey = 'ethz_wayf_guard_' + location.origin + location.pathname;
+    if (submittedWayfPages.has(guardKey)) return;
+
+    submittedWayfPages.add(guardKey);
+    sessionStorage.get([guardKey], (guardResult) => {
+      const lastSubmit = guardResult[guardKey] || 0;
+      if (Date.now() - lastSubmit < 30000) return; // Already tried in last 30s — stop
+
+      const submitBtn = findWayfSubmitButton(wayf.form);
+      if (!submitBtn) {
+        submittedWayfPages.delete(guardKey);
+        return;
+      }
+
+      if (wayf.option) {
+        wayf.control.value = wayf.option.value;
+        wayf.control.dispatchEvent(new Event('input', { bubbles: true }));
+        wayf.control.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+
+      const searchBox = document.querySelector('input#userIdPSelection_iddtext, input.idd_textbox');
+      if (searchBox) {
+        searchBox.value = 'ETH Zurich';
+        searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+        searchBox.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+
+      sessionStorage.set({ [guardKey]: Date.now() });
+      showOverlay();
+      setTimeout(() => submitWayfForm(wayf.form, submitBtn), 300);
+    });
+  };
+
+  const trySubmitEmbeddedWayf = (previouslyFailed) => {
+    if (previouslyFailed) return false;
+
+    const wayf = getEmbeddedWayfControl();
+    if (!wayf) return false;
+
+    submitEmbeddedWayf(wayf);
+    return true;
+  };
+
+  const watchForEmbeddedWayf = (previouslyFailed) => {
+    if (previouslyFailed || !isPotentialEmbeddedWayfPage()) return false;
+    if (trySubmitEmbeddedWayf(previouslyFailed)) return true;
+
+    let settled = false;
+    let intervalId = null;
+    let timeoutId = null;
+    let observer = null;
+
+    const stop = () => {
+      settled = true;
+      if (intervalId) clearInterval(intervalId);
+      if (timeoutId) clearTimeout(timeoutId);
+      observer?.disconnect();
+    };
+
+    const attempt = () => {
+      if (settled) return;
+      if (trySubmitEmbeddedWayf(previouslyFailed)) stop();
+    };
+
+    observer = new MutationObserver(attempt);
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    intervalId = setInterval(attempt, EMBEDDED_WAYF_RETRY_INTERVAL_MS);
+    timeoutId = setTimeout(stop, EMBEDDED_WAYF_RETRY_MS);
+
+    return true;
   };
 
   // ── GitLab LDAP login detection ──
-  // gitlab.inf.ethz.ch uses LDAP auth (not Shibboleth). Same ETHZ credentials,
-  // different form. Only auto-fill on this specific trusted host.
+  // gitlab.inf.ethz.ch uses LDAP auth (not Shibboleth). Same ETHZ password-manager
+  // entry, different form. Only auto-submit on this specific trusted host.
   const TRUSTED_LDAP_HOSTS = ['gitlab.inf.ethz.ch'];
 
   const isLdapLoginPage = () => {
@@ -78,7 +248,7 @@
     return !!(u && p);
   };
 
-  const dispatchInputEvents = (el) => {
+  const dispatchFieldEvents = (el) => {
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
   };
@@ -108,9 +278,9 @@
 
   // ── Logout detection ──
   // Watches for clicks on logout links/buttons. On click, notifies the background
-  // script which stores a 30-second bypass window in chrome.storage.session.
+  // script which stores a 30-second bypass window in extension session storage.
   // This survives the page navigation (unlike JS variables) but expires quickly
-  // (unlike the old 10-minute chrome.storage.local approach).
+  // (unlike the old 10-minute local-storage approach).
   const LOGOUT_PATTERN = /log\s*out|sign\s*out|abmelden|ausloggen|d[eé]connexion/i;
 
   const watchForLogout = () => {
@@ -122,10 +292,10 @@
       const href = target.getAttribute('href') || '';
 
       if (LOGOUT_PATTERN.test(text) || LOGOUT_PATTERN.test(href) ||
-          href.includes('logout') || href.includes('Logout') ||
+        href.includes('logout') || href.includes('Logout') ||
           href.includes('Shibboleth.sso/Logout')) {
         // Tell background to set the bypass timestamp
-        chrome.runtime.sendMessage({ type: 'LOGOUT_DETECTED' });
+        ext.runtime.sendMessage({ type: 'LOGOUT_DETECTED' });
       }
     }, true); // capture phase — fires before navigation
   };
@@ -248,18 +418,34 @@
     toast.id = 'ethz-autologin-toast';
     toast.classList.add(type === 'error' ? 'toast-error' : 'toast-info');
 
-    let actionHtml = '';
-    if (action) {
-      actionHtml = `<button class="toast-action ${action.danger ? 'danger' : ''}" id="ethz-toast-action">${action.label}</button>`;
-    }
+    const header = document.createElement('div');
+    header.className = 'toast-header';
 
-    toast.innerHTML = `
-      <div class="toast-header">
-        <span class="toast-title">${title}</span>
-        <button class="toast-close" id="ethz-toast-close">×</button>
-      </div>
-      <div class="toast-body">${body}${actionHtml}</div>
-    `;
+    const titleEl = document.createElement('span');
+    titleEl.className = 'toast-title';
+    titleEl.textContent = title;
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'toast-close';
+    closeBtn.id = 'ethz-toast-close';
+    closeBtn.type = 'button';
+    closeBtn.textContent = '×';
+
+    const bodyEl = document.createElement('div');
+    bodyEl.className = 'toast-body';
+    bodyEl.textContent = body;
+
+    header.append(titleEl, closeBtn);
+    toast.append(header, bodyEl);
+
+    if (action) {
+      const actionBtn = document.createElement('button');
+      actionBtn.className = action.danger ? 'toast-action danger' : 'toast-action';
+      actionBtn.id = 'ethz-toast-action';
+      actionBtn.type = 'button';
+      actionBtn.textContent = action.label;
+      bodyEl.appendChild(actionBtn);
+    }
 
     document.documentElement.appendChild(toast);
 
@@ -277,7 +463,7 @@
   const openExtensionPopup = () => {
     showToast({
       title: 'ETHZ Auto-Login',
-      body: 'Click the extension icon <strong>(🔒 E)</strong> in your toolbar to add or update your credentials.',
+      body: 'Click the extension icon in your toolbar to update setup or pause automation.',
       type: 'info'
     });
   };
@@ -319,11 +505,14 @@
     if (document.getElementById('ethz-autologin-overlay')) return;
     const overlay = document.createElement('div');
     overlay.id = 'ethz-autologin-overlay';
-    overlay.innerHTML = `
-      <style>${OVERLAY_CSS}</style>
-      <div class="ethz-spinner"></div>
-      <div class="ethz-label">Signing in to ETHZ…</div>
-    `;
+    const style = document.createElement('style');
+    style.textContent = OVERLAY_CSS;
+    const spinner = document.createElement('div');
+    spinner.className = 'ethz-spinner';
+    const label = document.createElement('div');
+    label.className = 'ethz-label';
+    label.textContent = 'Signing in to ETHZ…';
+    overlay.append(style, spinner, label);
     document.documentElement.appendChild(overlay);
 
     // Safety timeout: if login hasn't completed in 5s, remove overlay
@@ -334,34 +523,126 @@
     }, 5000);
   };
 
+  const isAutomationPaused = (pausedUntil) => Number(pausedUntil || 0) > Date.now();
+
+  const showPasswordManagerPrompt = () => {
+    showToast({
+      title: 'Password manager needed',
+      body: 'Use your browser password manager to fill your ETHZ username and password on this page. ETHZ Auto-Login does not store your password in password-manager mode.',
+      type: 'info'
+    });
+  };
+
+  const waitForAutofillAndSubmit = ({ userField, passField, submitButton }) => {
+    if (!userField || !passField || !submitButton) return;
+
+    let intervalId = null;
+    let timeoutId = null;
+    let settled = false;
+
+    const cleanup = () => {
+      if (intervalId) clearInterval(intervalId);
+      if (timeoutId) clearTimeout(timeoutId);
+      userField.removeEventListener('input', trySubmit);
+      userField.removeEventListener('change', trySubmit);
+      passField.removeEventListener('input', trySubmit);
+      passField.removeEventListener('change', trySubmit);
+    };
+
+    function trySubmit() {
+      if (settled) return;
+      if (!userField.value.trim() || !passField.value) return;
+
+      dispatchFieldEvents(userField);
+      dispatchFieldEvents(passField);
+      if (submitButton.disabled) return;
+
+      settled = true;
+      cleanup();
+      showOverlay();
+      setTimeout(() => submitButton.click(), 300);
+    }
+
+    const handleTimeout = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      showPasswordManagerPrompt();
+    };
+
+    userField.addEventListener('input', trySubmit);
+    userField.addEventListener('change', trySubmit);
+    passField.addEventListener('input', trySubmit);
+    passField.addEventListener('change', trySubmit);
+    intervalId = setInterval(trySubmit, AUTOFILL_POLL_MS);
+    timeoutId = setTimeout(handleTimeout, AUTOFILL_WAIT_MS);
+    trySubmit();
+  };
+
+  const fillAndSubmitStoredCredentials = ({ userField, passField, submitButton, username, password }) => {
+    if (!userField || !passField || !submitButton || !username || !password) return;
+
+    showOverlay();
+    userField.value = username;
+    passField.value = password;
+    dispatchFieldEvents(userField);
+    dispatchFieldEvents(passField);
+
+    if (!submitButton.disabled) {
+      setTimeout(() => submitButton.click(), 300);
+    }
+  };
+
+  const getLoginMode = (result) => {
+    if (result.ethz_login_mode) return result.ethz_login_mode;
+    if (result.ethz_username && result.ethz_password) return EXTENSION_STORAGE_MODE;
+    if (result.ethz_password_manager_enabled) return PASSWORD_MANAGER_MODE;
+    return null;
+  };
+
   // ── Main logic ──
   const run = () => {
     // Always watch for logout clicks on any ETHZ page
     watchForLogout();
 
-    // First check if we're in a post-logout bypass window (async, via background)
-    chrome.runtime.sendMessage({ type: 'CHECK_LOGOUT_BYPASS' }, (response) => {
-      if (response?.bypassed) return; // User just logged out — don't auto-login
+    ext.storage.local.get(
+      ['ethz_login_mode', 'ethz_username', 'ethz_password', 'ethz_password_manager_enabled', 'ethz_login_failed', 'ethz_automation_paused_until'],
+      (result) => {
+        const loginMode = getLoginMode(result);
+        const usesStoredCredentials = loginMode === EXTENSION_STORAGE_MODE;
+        const enabled = loginMode === PASSWORD_MANAGER_MODE ||
+          (usesStoredCredentials && !!(result.ethz_username && result.ethz_password));
+        const previouslyFailed = !!result.ethz_login_failed;
 
-      chrome.storage.local.get(
-        ['ethz_username', 'ethz_password', 'ethz_login_failed'],
-        (result) => {
-          const username = result.ethz_username;
-          const password = result.ethz_password;
-          const hasCreds = !!(username && password);
-          const previouslyFailed = !!result.ethz_login_failed;
+        if (isAutomationPaused(result.ethz_automation_paused_until)) return;
+
+        if (!enabled) {
+          if ((isIdpPage() && hasLoginForm()) || isLdapLoginPage()) {
+            showToast({
+              title: 'ETHZ Auto-Login',
+              body: 'Click the extension icon to enable login automation.',
+              type: 'info'
+            });
+          }
+          return;
+        }
+
+        // First check if we're in a post-logout bypass window (async, via background)
+        ext.runtime.sendMessage({ type: 'CHECK_LOGOUT_BYPASS' }, (response) => {
+          if (response?.bypassed) return; // User just logged out — don't auto-login
 
           // ─── IdP login page ───
           if (isIdpPage() && hasLoginForm()) {
-
-            if (hasLoginError() && hasCreds) {
-              chrome.runtime.sendMessage({ type: 'LOGIN_FAILED' });
+            if (hasLoginError()) {
+              ext.runtime.sendMessage({ type: 'LOGIN_FAILED' });
               showToast({
                 title: 'Login failed',
-                body: 'Your saved ETHZ credentials appear to be incorrect. Update or remove them in the extension settings.',
+                body: usesStoredCredentials
+                  ? 'The stored ETHZ login did not work. Update or remove it in the extension popup.'
+                  : 'The browser-filled ETHZ login did not work. Update the saved login in your browser password manager.',
                 type: 'error',
                 action: {
-                  label: 'Update credentials',
+                  label: 'Open setup',
                   danger: true,
                   onClick: openExtensionPopup
                 }
@@ -372,10 +653,12 @@
             if (previouslyFailed) {
               showToast({
                 title: 'Auto-login paused',
-                body: 'A previous login attempt failed. Update your credentials in the extension to try again.',
+                body: usesStoredCredentials
+                  ? 'A previous login attempt failed. Update the stored credentials in the extension popup to try again.'
+                  : 'A previous login attempt failed. Update your browser password manager entry, then open the extension popup to resume setup.',
                 type: 'error',
                 action: {
-                  label: 'Update credentials',
+                  label: 'Open setup',
                   danger: true,
                   onClick: openExtensionPopup
                 }
@@ -383,29 +666,20 @@
               return;
             }
 
-            if (!hasCreds) {
-              showToast({
-                title: 'ETHZ Auto-Login',
-                body: 'You haven\'t set up your login credentials yet. Click the extension icon to add them and skip this page next time.',
-                type: 'info'
+            const userField = findFirstMatch(USERNAME_SELECTORS);
+            const passField = findFirstMatch(PASSWORD_SELECTORS);
+            const submitButton = findSubmitButton();
+
+            if (usesStoredCredentials) {
+              fillAndSubmitStoredCredentials({
+                userField,
+                passField,
+                submitButton,
+                username: result.ethz_username,
+                password: result.ethz_password
               });
-              return;
-            }
-
-            // Happy path: overlay + fill + submit
-            showOverlay();
-
-            const u = findFirstMatch(USERNAME_SELECTORS);
-            const p = findFirstMatch(PASSWORD_SELECTORS);
-
-            u.value = username;
-            p.value = password;
-            dispatchInputEvents(u);
-            dispatchInputEvents(p);
-
-            const btn = findSubmitButton();
-            if (btn) {
-              setTimeout(() => btn.click(), 300);
+            } else {
+              waitForAutofillAndSubmit({ userField, passField, submitButton });
             }
             return;
           }
@@ -413,7 +687,7 @@
           // ─── SAML POST-back pages ───
           // These are hidden forms with SAMLResponse/SAMLRequest that need a click to continue.
           // Only click submit if the form actually contains SAML data (not random login pages).
-          if (isSamlPostBack() && hasCreds && !previouslyFailed) {
+          if (isSamlPostBack() && !previouslyFailed) {
             const samlForm =
               document.querySelector('form:has(input[name="SAMLResponse"])') ||
               document.querySelector('form:has(input[name="SAMLRequest"])');
@@ -427,24 +701,22 @@
           }
 
           // ─── GitLab LDAP login ───
-          if (isLdapLoginPage() && hasCreds && !previouslyFailed) {
+          if (isLdapLoginPage() && !previouslyFailed) {
             const userField = document.querySelector('input#ldapmain_username, input[name="username"][id*="ldap"]');
             const passField = document.querySelector('input#ldapmain_password, input[name="password"][id*="ldap"]');
+            const ldapForm = userField?.closest('form');
+            const submitBtn = ldapForm?.querySelector('button[type="submit"], input[type="submit"]');
 
-            if (userField && passField) {
-              showOverlay();
-
-              userField.value = username;
-              passField.value = password;
-              dispatchInputEvents(userField);
-              dispatchInputEvents(passField);
-
-              // Find the LDAP form's submit button (not the standard GitLab login)
-              const ldapForm = userField.closest('form');
-              const submitBtn = ldapForm?.querySelector('button[type="submit"], input[type="submit"]');
-              if (submitBtn) {
-                setTimeout(() => submitBtn.click(), 300);
-              }
+            if (usesStoredCredentials) {
+              fillAndSubmitStoredCredentials({
+                userField,
+                passField,
+                submitButton: submitBtn,
+                username: result.ethz_username,
+                password: result.ethz_password
+              });
+            } else {
+              waitForAutofillAndSubmit({ userField, passField, submitButton: submitBtn });
             }
             return;
           }
@@ -452,48 +724,17 @@
           // ─── Embedded WAYF / org-selection pages ───
           // E.g., Moodle's /auth/shibboleth/login.php with a dropdown to pick ETH Zurich.
           // Auto-select ETH Zurich and submit, with loop guard.
-          const wayf = getEmbeddedWayfSelect();
-          if (wayf && hasCreds && !previouslyFailed) {
-            // Loop guard: check if we already submitted on this page recently
-            const guardKey = 'ethz_wayf_guard_' + location.origin + location.pathname;
-            chrome.storage.session.get([guardKey], (guardResult) => {
-              const lastSubmit = guardResult[guardKey] || 0;
-              if (Date.now() - lastSubmit < 30000) return; // Already tried in last 30s — stop
-
-              // Set guard before submitting
-              chrome.storage.session.set({ [guardKey]: Date.now() });
-
-              // Select ETH Zurich
-              wayf.select.value = wayf.option.value;
-              wayf.select.dispatchEvent(new Event('change', { bubbles: true }));
-
-              // Also fill the text search box if present (newer WAYF UI)
-              const searchBox = document.querySelector('input#userIdPSelection_iddtext, input.idd_textbox');
-              if (searchBox) {
-                searchBox.value = 'ETH Zurich';
-                searchBox.dispatchEvent(new Event('input', { bubbles: true }));
-                searchBox.dispatchEvent(new Event('change', { bubbles: true }));
-              }
-
-              // Click submit
-              const submitBtn =
-                document.querySelector('button[name="Select"]') ||
-                document.querySelector('form button[type="submit"]') ||
-                document.querySelector('form input[type="submit"]');
-              if (submitBtn) {
-                setTimeout(() => submitBtn.click(), 300);
-              }
-            });
+          if (watchForEmbeddedWayf(previouslyFailed)) {
             return;
           }
 
           // ─── Normal ETHZ page — login succeeded ───
-          if (hasCreds && !isIdpPage() && !isSamlPostBack() && !isShibbolethEndpoint()) {
-            chrome.runtime.sendMessage({ type: 'LOGIN_SUCCEEDED' });
+          if (!isIdpPage() && !isSamlPostBack() && !isShibbolethEndpoint()) {
+            ext.runtime.sendMessage({ type: 'LOGIN_SUCCEEDED' });
           }
-        }
-      );
-    });
+        });
+      }
+    );
   };
 
   run();
