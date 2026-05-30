@@ -2,8 +2,6 @@
 
 Browser extension that automatically continues ETHZ login flows (Shibboleth / SWITCH AAI) in Chrome, Firefox, and Zen Browser. Save your ETHZ password in your browser passwords first; by default the extension uses the password filled by the browser password manager. If browser password manager autofill is disabled, users can optionally store credentials in the extension for fully automatic login.
 
-Upstream: [AlfredJustus/ethz-autologin](https://github.com/AlfredJustus/ethz-autologin)
-
 ## Features
 
 - **Auto-login** on ETHZ login URLs (IdP, GitLab LDAP, Moodle WAYF, Shibboleth/SAML handlers) — not on every `*.ethz.ch` page
@@ -170,14 +168,6 @@ If login fails, the extension will notify you and stop trying. Update the saved 
 - 100% open source — read every line of code
 
 See [PRIVACY.md](PRIVACY.md) for the full policy.
-
-## Contributing
-
-This repository is a Firefox-focused fork. To contribute upstream:
-
-1. Fork [AlfredJustus/ethz-autologin](https://github.com/AlfredJustus/ethz-autologin)
-2. Create a branch, make changes, and open a pull request against `main`
-3. Keep `manifest.firefox.json` and Firefox build/sign scripts in sync when touching shared logic
 
 ## Changelog
 
