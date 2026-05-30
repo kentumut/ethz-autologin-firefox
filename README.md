@@ -4,7 +4,7 @@ Browser extension that automatically continues ETHZ login flows (Shibboleth / SW
 
 ## Features
 
-- **Auto-login** on any `*.ethz.ch` site that uses Shibboleth SSO (Moodle, video.ethz.ch, etc.)
+- **Auto-login** on ETHZ login URLs (IdP, GitLab LDAP, Moodle WAYF, Shibboleth/SAML handlers) — not on every `*.ethz.ch` page
 - **Seamless redirect** — clean spinner overlay while the SSO chain completes, no page flashing
 - **Security first by default** — password-manager mode uses browser-saved passwords and avoids extension password storage
 - **Optional convenience mode** — users can explicitly store ETHZ credentials in extension local storage if browser password manager autofill is disabled
@@ -148,7 +148,8 @@ If login fails, the extension will notify you and stop trying. Update the saved 
 | `manifest.json` | Chrome extension config (Manifest V3 service worker) |
 | `manifest.firefox.json` | Firefox extension config (Manifest V3 background script) |
 | `background.js` | First-install handling, failure state management |
-| `content.js` | Login flow detection, overlay, autofill wait, auto-submit, notifications |
+| `content.js` | Login flow detection, overlay, autofill wait, auto-submit, notifications (login URLs only) |
+| `logout-watch.js` | Lightweight logout click detection on all `*.ethz.ch` pages |
 | `popup.html/css/js` | Settings UI for login mode, credentials, and pause control |
 | `icons/` | Extension icons |
 | `scripts/build.js` | Browser-specific build output |

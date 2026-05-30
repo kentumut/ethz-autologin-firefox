@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ETHZ Auto-Login",
-  "version": "3.0",
+  "version": "3.1",
   "description": "Automatically continues ETHZ login flows with browser-saved passwords or opt-in stored credentials",
   "permissions": ["storage"],
   "host_permissions": [
@@ -22,6 +22,16 @@
   "content_scripts": [
     {
       "matches": ["*://*.ethz.ch/*"],
+      "js": ["logout-watch.js"],
+      "run_at": "document_end"
+    },
+    {
+      "matches": [
+        "*://aai-logon.ethz.ch/*",
+        "*://gitlab.inf.ethz.ch/*",
+        "*://*.ethz.ch/*/auth/shibboleth/login.php*",
+        "*://*.ethz.ch/*/Shibboleth.sso/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_end"
     },

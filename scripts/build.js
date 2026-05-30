@@ -20,6 +20,7 @@ const manifestSource = target === 'firefox'
 const files = [
   'background.js',
   'content.js',
+  'logout-watch.js',
   'popup.css',
   'popup.html',
   'popup.js',

@@ -25,7 +25,8 @@ Extension local storage is:
 The extension helps with ETHZ login flows locally:
 - **Shibboleth login forms** on `aai-logon.ethz.ch`: uses the password filled by the browser password manager or fills explicitly stored extension credentials, then submits
 - **LDAP login forms** on `gitlab.inf.ethz.ch`: uses the password filled by the browser password manager or fills explicitly stored extension credentials, then submits
-- **WAYF organisation selection** on `wayf.switch.ch` and embedded org pickers on ETHZ sites
+- **WAYF organisation selection** on `wayf.switch.ch` and embedded org pickers on ETHZ login URLs
+- **Logout detection** on all `*.ethz.ch` pages via a minimal script (no credential access)
 
 The extension does not fetch or decrypt passwords from the browser password manager; it only uses the values the browser autofills into the login form.
 
@@ -44,7 +45,7 @@ This extension makes **zero** network requests. It does not contact any external
 | Permission | Why |
 |---|---|
 | `storage` | Save local setup, pause, failure state, and optional extension-stored credentials |
-| `*://*.ethz.ch/*` | Detect ETHZ login flows and submit after browser autofill or opt-in extension fill |
+| `*://*.ethz.ch/*` | Detect logout clicks (minimal script); login automation runs only on IdP, GitLab LDAP, Moodle WAYF, and Shibboleth/SAML URLs |
 | `*://wayf.switch.ch/*` | Auto-select ETH Zurich on the SWITCH AAI org picker |
 
 ## Open source

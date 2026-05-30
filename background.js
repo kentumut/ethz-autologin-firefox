@@ -4,6 +4,13 @@
 const ext = globalThis.chrome || globalThis.browser;
 const sessionStorage = ext.storage.session || ext.storage.local;
 
+const LOGIN_SUCCEEDED_DEBOUNCE_MS = 60000;
+const WAYF_GUARD_PREFIX = 'ethz_wayf_guard_';
+const WAYF_GUARD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const WAYF_GUARD_MAX_KEYS = 50;
+
+let lastLoginSucceededAt = 0;
+
 const migrateLoginMode = () => {
   ext.storage.local.get(
     ['ethz_login_mode', 'ethz_password', 'ethz_username', 'ethz_password_manager_enabled'],
@@ -25,16 +32,47 @@ const migrateLoginMode = () => {
   );
 };
 
+const pruneWayfGuardKeys = () => {
+  sessionStorage.get(null, (all) => {
+    if (!all) return;
+
+    const now = Date.now();
+    const guardEntries = Object.entries(all)
+      .filter(([key]) => key.startsWith(WAYF_GUARD_PREFIX))
+      .map(([key, value]) => [key, Number(value) || 0])
+      .sort((a, b) => b[1] - a[1]);
+
+    const toRemove = guardEntries
+      .filter(([, timestamp]) => now - timestamp > WAYF_GUARD_MAX_AGE_MS)
+      .map(([key]) => key);
+
+    const surviving = guardEntries.filter(([key]) => !toRemove.includes(key));
+    if (surviving.length > WAYF_GUARD_MAX_KEYS) {
+      toRemove.push(...surviving.slice(WAYF_GUARD_MAX_KEYS).map(([key]) => key));
+    }
+
+    if (toRemove.length > 0) {
+      sessionStorage.remove(toRemove);
+    }
+  });
+};
+
 migrateLoginMode();
+pruneWayfGuardKeys();
 
 // Open the welcome/setup page on first install
 ext.runtime.onInstalled.addListener((details) => {
   migrateLoginMode();
+  pruneWayfGuardKeys();
 
   if (details.reason === 'install') {
     ext.tabs.create({ url: ext.runtime.getURL('welcome.html') });
   }
 });
+
+if (ext.runtime.onStartup) {
+  ext.runtime.onStartup.addListener(pruneWayfGuardKeys);
+}
 
 // Listen for messages from content script and popup
 ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -44,6 +82,12 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'LOGIN_SUCCEEDED') {
+    const now = Date.now();
+    if (now - lastLoginSucceededAt < LOGIN_SUCCEEDED_DEBOUNCE_MS) {
+      sendResponse({ ok: true, skipped: true });
+      return false;
+    }
+    lastLoginSucceededAt = now;
     ext.storage.local.remove(['ethz_login_failed']);
     sendResponse({ ok: true });
   }

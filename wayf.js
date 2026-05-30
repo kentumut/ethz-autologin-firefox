@@ -62,6 +62,7 @@
             document.querySelector('input[type="submit"]');
 
           if (submitBtn) {
+            ext.runtime.sendMessage({ type: 'LOGIN_SUCCEEDED' });
             setTimeout(() => submitBtn.click(), 400);
           }
         });

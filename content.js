@@ -51,7 +51,7 @@
   // These have a dropdown to select your institution before triggering the SSO flow.
   const ETH_IDP_VALUE = 'https://aai-logon.ethz.ch/idp/shibboleth';
   const ETH_IDP_TEXT = /ETH Z(u|ü)rich/i;
-  const submittedWayfPages = new Set();
+  const LOGIN_ERROR_PATTERN = /incorrect.*password|wrong.*password|invalid.*credentials|authentication.*failed|login.*failed|falsches.*passwort|anmeldung.*fehlgeschlagen/i;
 
   const isEthIdpValue = (value) =>
     (value || '').includes(ETH_IDP_VALUE) || ETH_IDP_TEXT.test(value || '');
@@ -104,9 +104,10 @@
     return `${el.textContent || ''} ${el.getAttribute('aria-label') || ''} ${el.name || ''}`;
   };
 
-  const isPotentialEmbeddedWayfPage = () =>
-    location.pathname.includes('/auth/shibboleth/login.php') ||
-    !!document.querySelector('form#login select#idp[name="idp"], select[name="user_idp"], select#userIdPSelection, select[name="idp"], select#idp, input#userIdPSelection_iddtext, input.idd_textbox');
+  const isPotentialEmbeddedWayfPage = () => {
+    if (location.pathname.includes('/auth/shibboleth/login.php')) return true;
+    return !!getEmbeddedWayfControl();
+  };
 
   const findWayfSubmitButton = (form) => {
     if (!form) return null;
@@ -149,20 +150,18 @@
     submitBtn?.click();
   };
 
+  const notifyLoginSucceeded = () => {
+    ext.runtime.sendMessage({ type: 'LOGIN_SUCCEEDED' });
+  };
+
   const submitEmbeddedWayf = (wayf) => {
     const guardKey = 'ethz_wayf_guard_' + location.origin + location.pathname;
-    if (submittedWayfPages.has(guardKey)) return;
-
-    submittedWayfPages.add(guardKey);
     sessionStorage.get([guardKey], (guardResult) => {
       const lastSubmit = guardResult[guardKey] || 0;
       if (Date.now() - lastSubmit < 30000) return; // Already tried in last 30s — stop
 
       const submitBtn = findWayfSubmitButton(wayf.form);
-      if (!submitBtn) {
-        submittedWayfPages.delete(guardKey);
-        return;
-      }
+      if (!submitBtn) return;
 
       if (wayf.option) {
         wayf.control.value = wayf.option.value;
@@ -179,6 +178,7 @@
 
       sessionStorage.set({ [guardKey]: Date.now() });
       showOverlay();
+      notifyLoginSucceeded();
       setTimeout(() => submitWayfForm(wayf.form, submitBtn), 300);
     });
   };
@@ -214,8 +214,14 @@
       if (trySubmitEmbeddedWayf(previouslyFailed)) stop();
     };
 
+    const observeTarget =
+      document.querySelector('form#login') ||
+      getEmbeddedWayfControl()?.form ||
+      document.body;
+    if (!observeTarget) return false;
+
     observer = new MutationObserver(attempt);
-    observer.observe(document.documentElement, { childList: true, subtree: true });
+    observer.observe(observeTarget, { childList: true, subtree: true });
     intervalId = setInterval(attempt, EMBEDDED_WAYF_RETRY_INTERVAL_MS);
     timeoutId = setTimeout(stop, EMBEDDED_WAYF_RETRY_MS);
 
@@ -248,6 +254,12 @@
     return !!(u && p);
   };
 
+  const isLoginAutomationPage = () =>
+    (isIdpPage() && hasLoginForm()) ||
+    isLdapLoginPage() ||
+    isSamlPostBack() ||
+    isPotentialEmbeddedWayfPage();
+
   const dispatchFieldEvents = (el) => {
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -276,30 +288,6 @@
     );
   };
 
-  // ── Logout detection ──
-  // Watches for clicks on logout links/buttons. On click, notifies the background
-  // script which stores a 30-second bypass window in extension session storage.
-  // This survives the page navigation (unlike JS variables) but expires quickly
-  // (unlike the old 10-minute local-storage approach).
-  const LOGOUT_PATTERN = /log\s*out|sign\s*out|abmelden|ausloggen|d[eé]connexion/i;
-
-  const watchForLogout = () => {
-    document.addEventListener('click', (e) => {
-      const target = e.target.closest('a, button');
-      if (!target) return;
-
-      const text = target.textContent || '';
-      const href = target.getAttribute('href') || '';
-
-      if (LOGOUT_PATTERN.test(text) || LOGOUT_PATTERN.test(href) ||
-        href.includes('logout') || href.includes('Logout') ||
-          href.includes('Shibboleth.sso/Logout')) {
-        // Tell background to set the bypass timestamp
-        ext.runtime.sendMessage({ type: 'LOGOUT_DETECTED' });
-      }
-    }, true); // capture phase — fires before navigation
-  };
-
   // ── Detect login errors on the page ──
   const hasLoginError = () => {
     const errorSelectors = [
@@ -315,8 +303,11 @@
       const el = document.querySelector(sel);
       if (el && el.offsetParent !== null) return true;
     }
-    const body = document.body?.textContent || '';
-    return /incorrect.*password|wrong.*password|invalid.*credentials|authentication.*failed|login.*failed|falsches.*passwort|anmeldung.*fehlgeschlagen/i.test(body);
+    const loginForm =
+      findFirstMatch(USERNAME_SELECTORS)?.closest('form') ||
+      document.querySelector('form');
+    if (!loginForm) return false;
+    return LOGIN_ERROR_PATTERN.test(loginForm.textContent || '');
   };
 
   // ── Toast notification system ──
@@ -560,6 +551,7 @@
       settled = true;
       cleanup();
       showOverlay();
+      notifyLoginSucceeded();
       setTimeout(() => submitButton.click(), 300);
     }
 
@@ -589,6 +581,7 @@
     dispatchFieldEvents(passField);
 
     if (!submitButton.disabled) {
+      notifyLoginSucceeded();
       setTimeout(() => submitButton.click(), 300);
     }
   };
@@ -602,16 +595,24 @@
 
   // ── Main logic ──
   const run = () => {
-    // Always watch for logout clicks on any ETHZ page
-    watchForLogout();
+    if (!isLoginAutomationPage()) return;
 
-    ext.storage.local.get(
-      ['ethz_login_mode', 'ethz_username', 'ethz_password', 'ethz_password_manager_enabled', 'ethz_login_failed', 'ethz_automation_paused_until'],
-      (result) => {
+    const onCredentialPage = (isIdpPage() && hasLoginForm()) || isLdapLoginPage();
+    const storageKeys = [
+      'ethz_login_mode',
+      'ethz_password_manager_enabled',
+      'ethz_login_failed',
+      'ethz_automation_paused_until'
+    ];
+    if (onCredentialPage) {
+      storageKeys.push('ethz_username', 'ethz_password');
+    }
+
+    ext.storage.local.get(storageKeys, (result) => {
         const loginMode = getLoginMode(result);
         const usesStoredCredentials = loginMode === EXTENSION_STORAGE_MODE;
         const enabled = loginMode === PASSWORD_MANAGER_MODE ||
-          (usesStoredCredentials && !!(result.ethz_username && result.ethz_password));
+          (usesStoredCredentials && (!onCredentialPage || !!(result.ethz_username && result.ethz_password)));
         const previouslyFailed = !!result.ethz_login_failed;
 
         if (isAutomationPaused(result.ethz_automation_paused_until)) return;
@@ -694,6 +695,7 @@
             if (samlForm) {
               const submitBtn = samlForm.querySelector('input[type="submit"], button[type="submit"]');
               if (submitBtn) {
+                notifyLoginSucceeded();
                 setTimeout(() => submitBtn.click(), 100);
               }
             }
@@ -724,17 +726,9 @@
           // ─── Embedded WAYF / org-selection pages ───
           // E.g., Moodle's /auth/shibboleth/login.php with a dropdown to pick ETH Zurich.
           // Auto-select ETH Zurich and submit, with loop guard.
-          if (watchForEmbeddedWayf(previouslyFailed)) {
-            return;
-          }
-
-          // ─── Normal ETHZ page — login succeeded ───
-          if (!isIdpPage() && !isSamlPostBack() && !isShibbolethEndpoint()) {
-            ext.runtime.sendMessage({ type: 'LOGIN_SUCCEEDED' });
-          }
+          watchForEmbeddedWayf(previouslyFailed);
         });
-      }
-    );
+    });
   };
 
   run();
