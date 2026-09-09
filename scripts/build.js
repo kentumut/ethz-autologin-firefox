@@ -12,6 +12,7 @@ if (!targets.has(target)) {
 }
 
 const root = path.resolve(__dirname, '..');
+const sourceDir = path.join(root, 'src');
 const outDir = path.join(root, 'dist', target);
 const manifestSource = target === 'firefox'
   ? 'manifest.firefox.json'
@@ -26,8 +27,7 @@ const files = [
   'popup.js',
   'welcome.html',
   'welcome.js',
-  'wayf.js',
-  'PRIVACY.md'
+  'wayf.js'
 ];
 
 const copyFile = (from, to) => {
@@ -52,10 +52,11 @@ fs.rmSync(outDir, { recursive: true, force: true });
 fs.mkdirSync(outDir, { recursive: true });
 
 for (const file of files) {
-  copyFile(path.join(root, file), path.join(outDir, file));
+  copyFile(path.join(sourceDir, file), path.join(outDir, file));
 }
 
-copyDir(path.join(root, 'icons'), path.join(outDir, 'icons'));
-copyFile(path.join(root, manifestSource), path.join(outDir, 'manifest.json'));
+copyDir(path.join(sourceDir, 'icons'), path.join(outDir, 'icons'));
+copyFile(path.join(sourceDir, manifestSource), path.join(outDir, 'manifest.json'));
+copyFile(path.join(root, 'PRIVACY.md'), path.join(outDir, 'PRIVACY.md'));
 
 console.log(`Built ${target} extension in ${path.relative(root, outDir)}`);

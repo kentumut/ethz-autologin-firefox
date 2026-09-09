@@ -17,9 +17,9 @@ Browser extension that automatically continues ETHZ login flows (Shibboleth / SW
 
 | Script | Where it runs | Purpose |
 |--------|----------------|---------|
-| `logout-watch.js` | `*://*.ethz.ch/*` | Detect logout clicks (no credentials, no DOM observers) |
-| `content.js` | `aai-logon.ethz.ch`, `gitlab.inf.ethz.ch`, `*/auth/shibboleth/login.php*`, `*/Shibboleth.sso/*` | Login automation, overlays, autofill |
-| `wayf.js` | `wayf.switch.ch` | Select ETH Zurich on the SWITCH AAI org picker |
+| `src/logout-watch.js` | `*://*.ethz.ch/*` | Detect logout clicks (no credentials, no DOM observers) |
+| `src/content.js` | `aai-logon.ethz.ch`, `gitlab.inf.ethz.ch`, `*/auth/shibboleth/login.php*`, `*/Shibboleth.sso/*` | Login automation, overlays, autofill |
+| `src/wayf.js` | `wayf.switch.ch` | Select ETH Zurich on the SWITCH AAI org picker |
 
 Non-ETH sites (Google, GitHub, etc.) never receive these scripts. Host permissions for `*.ethz.ch` do not inject code by themselves.
 
@@ -28,9 +28,9 @@ Non-ETH sites (Google, GitHub, etc.) never receive these scripts. Host permissio
 1. Clone or download this repo
 2. Open Chrome → `chrome://extensions`
 3. Enable **Developer mode** (top-right toggle)
-4. Click **Load unpacked** → select this folder
+4. Click **Load unpacked** → select this repo's `src/` folder
 
-Chrome uses `manifest.json` directly. This remains the primary Chrome manifest and uses a Manifest V3 background service worker.
+Chrome uses `src/manifest.json` directly. This remains the primary Chrome manifest and uses a Manifest V3 background service worker.
 
 ## Install in Firefox
 
@@ -126,7 +126,7 @@ Build command: npm run build:firefox
 Firefox source directory for review/signing: dist/firefox
 ```
 
-For updates, increment the version in `manifest.firefox.json` and `manifest.json`, rebuild, then sign or submit:
+For updates, increment the version in `src/manifest.firefox.json` and `src/manifest.json`, rebuild, then sign or submit:
 
 - Unlisted: `npm run sign:firefox`
 - Listed (AMO): `npm run submit:firefox:listed`
@@ -142,10 +142,10 @@ npm run submit:firefox:listed
 npm run build
 ```
 
-The build script writes browser-specific output to `dist/`:
+The build script reads extension files from `src/`, includes the root `PRIVACY.md`, and writes browser-specific output to `dist/`:
 
-- `dist/chrome` uses the source `manifest.json`
-- `dist/firefox` uses `manifest.firefox.json` copied as `manifest.json`
+- `dist/chrome` uses the source `src/manifest.json`
+- `dist/firefox` uses `src/manifest.firefox.json` copied as `manifest.json`
 
 ## Usage
 
@@ -181,15 +181,19 @@ See [PRIVACY.md](PRIVACY.md) for the full policy.
 
 ## Files
 
+Extension files live in `src/`, with build and signing tooling in `scripts/`. Project documentation and configuration stay at the root. Generated builds and packages go in the ignored `dist/` and `artifacts/` folders.
+
 | File | Purpose |
 |------|---------|
-| `manifest.json` | Chrome extension config (Manifest V3 service worker) |
-| `manifest.firefox.json` | Firefox extension config (Manifest V3 background script) |
-| `background.js` | First-install handling, failure state management |
-| `content.js` | Login flow detection, overlay, autofill wait, auto-submit, notifications (login URLs only) |
-| `logout-watch.js` | Lightweight logout click detection on all `*.ethz.ch` pages |
-| `popup.html/css/js` | Settings UI for login mode, credentials, and pause control |
-| `icons/` | Extension icons |
+| `src/manifest.json` | Chrome extension config (Manifest V3 service worker) |
+| `src/manifest.firefox.json` | Firefox extension config (Manifest V3 background script) |
+| `src/background.js` | First-install handling, failure state management |
+| `src/content.js` | Login flow detection, overlay, autofill wait, auto-submit, notifications (login URLs only) |
+| `src/logout-watch.js` | Lightweight logout click detection on all `*.ethz.ch` pages |
+| `src/wayf.js` | SWITCH AAI identity-provider selection |
+| `src/popup.html/css/js` | Settings UI for login mode, credentials, and pause control |
+| `src/welcome.html/js` | First-install setup UI |
+| `src/icons/` | Extension icons |
 | `scripts/build.js` | Browser-specific build output |
 
 ## License
