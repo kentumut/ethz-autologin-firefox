@@ -2,7 +2,7 @@
   "name": "ethz-autologin",
   "private": true,
   "scripts": {
-    "test": "node --test scripts/content.test.js",
+    "test": "node --test scripts/*.test.js",
     "build": "npm run build:chrome && npm run build:firefox",
     "build:chrome": "node scripts/build.js chrome",
     "build:firefox": "node scripts/build.js firefox",

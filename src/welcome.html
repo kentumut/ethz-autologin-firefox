@@ -15,13 +15,13 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        overflow: hidden;
+        overflow-y: auto;
       }
 
       .flow {
         width: 100%;
         max-width: 480px;
-        padding: 0 24px;
+        padding: 40px 24px;
         position: relative;
       }
 
@@ -164,6 +164,7 @@
         display: flex;
         align-items: center;
         gap: 16px;
+        flex-wrap: wrap;
         margin-top: 8px;
       }
 
@@ -304,50 +305,56 @@
 
     <div class="flow">
 
-      <!-- Step 1: Username -->
+      <!-- Step 1: Choose where credentials are stored -->
       <div class="step active" id="step-1">
-        <div class="step-number">Setup</div>
-        <h1>What's your <span>ETHZ username</span>?</h1>
-        <p class="hint">
-          Before enabling ETHZ Auto-Login, save your ETHZ password in your browser's password manager. The extension uses the password that the browser fills on the login page.
-        </p>
-        <div class="setup-card">
-          <strong>Save your password in browser passwords:</strong>
-          <ol>
-            <li>Open your browser password manager.</li>
-            <li>Add or update the login for <strong>https://access.ethz.ch</strong>. Keep your <strong>aai-logon.ethz.ch</strong> entry for older ETHZ login pages.</li>
-            <li>Save your nethz username and ETHZ password there.</li>
-          </ol>
+        <div class="step-number">1 · Login method</div>
+        <h1>Is your ETH password <span>saved in your browser</span>?</h1>
+        <p class="hint">Choose how ETHZ Auto-Login should fill your login details.</p>
+        <div class="setup-card" role="radiogroup" aria-label="Login method">
+          <label style="display: block; margin-bottom: 18px; cursor: pointer;">
+            <input type="radio" name="login-mode" id="mode-browser" value="password_manager" />
+            <strong>Yes, it’s saved and autofill is enabled</strong><br />
+            Use my browser’s password manager.
+          </label>
+          <label style="display: block; cursor: pointer;">
+            <input type="radio" name="login-mode" id="mode-extension" value="extension_storage" />
+            <strong>No, save my credentials in this extension</strong><br />
+            Fill my ETH login without browser autofill.
+          </label>
         </div>
-        <div class="input-group">
-          <input id="username" type="text" placeholder="e.g. jsmith" autocomplete="username" autofocus />
-        </div>
-        <div class="input-error" id="error-1"></div>
+        <div class="input-error" id="error-1" role="alert"></div>
         <div class="btn-row">
-          <button class="btn btn-primary" id="next-1">Continue</button>
-          <button class="btn btn-skip pw-manager-link" type="button">Open password manager</button>
-          <button class="btn btn-skip" id="skip-1">I'll do this later</button>
+          <button class="btn btn-primary" id="next-1" type="button">Continue</button>
+          <button class="btn btn-skip" id="skip-1" type="button">I’ll do this later</button>
         </div>
-        <p class="key-hint">Press <kbd>Enter ↵</kbd></p>
       </div>
 
-      <!-- Step 2: Password manager -->
+      <!-- Step 2: Set up the selected login method -->
       <div class="step" id="step-2">
-        <div class="step-number">Browser passwords</div>
-        <h1>Save it in your <span>password manager</span>.</h1>
-        <p class="hint">
-          Save your ETHZ password in your browser passwords first. The extension uses the password your browser password manager fills, then continues the login automatically.
-        </p>
-        <div class="setup-card">
-          Use <strong>https://access.ethz.ch</strong> as the saved login site for ETH Authentication. Complete any later multi-factor authentication step yourself. If browser password manager autofill is disabled, you can optionally store the password in this extension from the popup.
+        <div class="step-number">2 · Your ETH login</div>
+        <h1 id="credentials-title">Your <span>ETH username</span>.</h1>
+        <p class="hint" id="mode-description"></p>
+        <div class="input-group">
+          <label for="username">ETH username</label>
+          <input id="username" type="text" placeholder="e.g. jsmith" autocomplete="username" />
         </div>
-        <div class="input-error" id="error-2"></div>
-        <div class="btn-row">
-          <button class="btn btn-primary" id="next-2">I've saved it</button>
+        <div id="extension-fields" hidden>
+          <div class="input-group">
+            <label for="password">ETH password for web applications (LDAP)</label>
+            <input id="password" type="password" autocomplete="off" />
+          </div>
+          <p class="setup-card">Your password will be saved locally in this extension. Someone with access to your browser profile may be able to recover it. You can remove it or change the login method from the extension popup.</p>
+        </div>
+        <div id="browser-help" class="setup-card">
+          Your browser should have a saved login for <strong>https://access.ethz.ch</strong> with autofill enabled. Keep your <strong>aai-logon.ethz.ch</strong> entry for older login pages.
           <button class="btn btn-skip pw-manager-link" type="button">Open password manager</button>
-          <button class="btn btn-skip" id="skip-2">I'll do this later</button>
         </div>
-        <p class="key-hint">Press <kbd>Enter ↵</kbd> when ready</p>
+        <div class="input-error" id="error-2" role="alert"></div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="next-2" type="button">Enable auto-login</button>
+          <button class="btn btn-skip" id="back-2" type="button">Back</button>
+          <button class="btn btn-skip" id="skip-2" type="button">Later</button>
+        </div>
         <p class="step-footer">
           <a href="https://github.com/AlfredJustus/ethz-autologin" target="_blank" rel="noopener" class="github-link">
             <svg class="github-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
@@ -359,15 +366,15 @@
       <!-- Step 3: Done -->
       <div class="step" id="step-3">
         <div class="done-icon">✓</div>
-        <h1>You're all set.</h1>
+        <h1 id="done-title">You’re all set.</h1>
         <p class="hint" id="done-message">
           Next time you visit an ETHZ website, you'll be logged in automatically.
         </p>
 
-        <div class="done-features">
+        <div class="done-features" id="done-features">
           <div class="feat">
             <span class="icon">🔐</span>
-            <span>Uses the password filled by your browser password manager; extension password storage is optional</span>
+            <span id="done-mode"></span>
           </div>
           <div class="feat">
             <span class="icon">⚡</span>
