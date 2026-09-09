@@ -53,7 +53,7 @@ const updateModeUi = () => {
     : 'Use your browser password manager';
   modeHelperEl.textContent = usesExtensionStorage
     ? 'Optional if browser password manager autofill is disabled. This stores your ETHZ password in extension local storage, where someone with local extension/profile access may be able to extract it.'
-    : 'Save your ETHZ login in Firefox, Zen, Chrome, or another browser password manager. This extension uses the password the browser fills, then continues automatically.';
+    : 'Save your ETHZ login for https://access.ethz.ch in your browser password manager. This extension uses the password the browser fills, then continues automatically. Complete any later multi-factor authentication yourself.';
 };
 
 const formatPause = (pausedUntil) => {

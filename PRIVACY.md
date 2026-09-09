@@ -1,6 +1,6 @@
 # Privacy Policy — ETHZ Auto-Login
 
-**Last updated:** March 17, 2026
+**Last updated:** September 9, 2026
 
 ## What data we collect
 None. This extension does not collect, transmit, or store any data externally.
@@ -23,6 +23,7 @@ Extension local storage is:
 
 ## What the extension does with login pages
 The extension helps with ETHZ login flows locally:
+- **ETH Authentication password forms** on `https://access.ethz.ch/idpauthapp/`: uses the password filled by the browser password manager or fills explicitly stored extension credentials, then submits; subsequent multi-factor challenges are left to the user
 - **Shibboleth login forms** on `aai-logon.ethz.ch`: uses the password filled by the browser password manager or fills explicitly stored extension credentials, then submits
 - **LDAP login forms** on `gitlab.inf.ethz.ch`: uses the password filled by the browser password manager or fills explicitly stored extension credentials, then submits
 - **WAYF organisation selection** on `wayf.switch.ch` and embedded org pickers on ETHZ login URLs

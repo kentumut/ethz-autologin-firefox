@@ -2,6 +2,7 @@
   "name": "ethz-autologin",
   "private": true,
   "scripts": {
+    "test": "node --test scripts/content.test.js",
     "build": "npm run build:chrome && npm run build:firefox",
     "build:chrome": "node scripts/build.js chrome",
     "build:firefox": "node scripts/build.js firefox",
@@ -12,6 +13,7 @@
     "submit:firefox:listed": "npm run build:firefox && node --env-file=.env scripts/check-firefox-sign-env.js && node --env-file=.env ./node_modules/web-ext/bin/web-ext.js sign --source-dir dist/firefox --artifacts-dir artifacts/firefox-listed --channel listed --amo-metadata amo-metadata.json"
   },
   "devDependencies": {
+    "jsdom": "^29.1.1",
     "web-ext": "^10.2.0"
   }
 }

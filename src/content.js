@@ -10,6 +10,7 @@
   const sessionStorage = ext.storage.session || ext.storage.local;
   const AUTOFILL_WAIT_MS = 5000;
   const AUTOFILL_POLL_MS = 150;
+  const LOGIN_FORM_WAIT_MS = 15000;
   const EMBEDDED_WAYF_RETRY_MS = 3000;
   const EMBEDDED_WAYF_RETRY_INTERVAL_MS = 150;
   const PASSWORD_MANAGER_MODE = 'password_manager';
@@ -33,7 +34,12 @@
   ];
 
   // ── Detection helpers ──
-  const isIdpPage = () => TRUSTED_IDP_HOSTS.includes(location.hostname);
+  const isAccessAuthUrl = (url) =>
+    url.protocol === 'https:' && url.hostname === 'access.ethz.ch' &&
+    (url.pathname === '/idpauthapp' || url.pathname.startsWith('/idpauthapp/'));
+
+  const isAccessAuthPage = () => isAccessAuthUrl(location);
+  const isIdpPage = () => TRUSTED_IDP_HOSTS.includes(location.hostname) || isAccessAuthPage();
 
   // Detects SAML POST-back pages — hidden forms that need a click to continue.
   // These are NOT user-facing login pages. They contain a hidden SAMLResponse/SAMLRequest
@@ -248,11 +254,36 @@
     return null;
   };
 
-  const hasLoginForm = () => {
-    const u = findFirstMatch(USERNAME_SELECTORS);
-    const p = findFirstMatch(PASSWORD_SELECTORS);
-    return !!(u && p);
+  const getIdpLoginFields = () => {
+    if (isAccessAuthPage()) {
+      // Match the observed ETH Access password form, not later MFA challenges.
+      const form = document.querySelector('form#dataForm');
+      if (!form || form.method.toLowerCase() !== 'post') return null;
+      let action;
+      try {
+        action = new URL(form.action, location.href);
+      } catch {
+        return null;
+      }
+      if (action.origin !== location.origin || !isAccessAuthUrl(action)) return null;
+
+      const userField = form.querySelector('input[name="com.siemens.dxa.applications.web.authn.challenging.username"][type="text"]');
+      const passField = form.querySelector('input[name="com.siemens.dxa.applications.web.authn.challenging.response"][type="password"][autocomplete="current-password"]');
+      const submitButton = form.querySelector('button[type="submit"]');
+      if (!userField || !passField || !submitButton ||
+          userField.disabled || passField.disabled || userField.readOnly || passField.readOnly) return null;
+      // The observed button uses the form destination without overrides.
+      if (submitButton.hasAttribute('formaction') || submitButton.hasAttribute('formmethod')) return null;
+      return { userField, passField, submitButton };
+    }
+
+    const userField = findFirstMatch(USERNAME_SELECTORS);
+    const passField = findFirstMatch(PASSWORD_SELECTORS);
+    if (!userField || !passField) return null;
+    return { userField, passField, submitButton: findSubmitButton() };
   };
+
+  const hasLoginForm = () => !!getIdpLoginFields();
 
   const isLoginAutomationPage = () =>
     (isIdpPage() && hasLoginForm()) ||
@@ -290,6 +321,10 @@
 
   // ── Detect login errors on the page ──
   const hasLoginError = () => {
+    if (isAccessAuthPage()) {
+      const errors = document.querySelector('form#dataForm #failList');
+      if (errors && errors.offsetParent !== null && errors.textContent.trim()) return true;
+    }
     const errorSelectors = [
       '.login-error',
       '.error-message',
@@ -304,7 +339,7 @@
       if (el && el.offsetParent !== null) return true;
     }
     const loginForm =
-      findFirstMatch(USERNAME_SELECTORS)?.closest('form') ||
+      getIdpLoginFields()?.userField.closest('form') ||
       document.querySelector('form');
     if (!loginForm) return false;
     return LOGIN_ERROR_PATTERN.test(loginForm.textContent || '');
@@ -524,12 +559,23 @@
     });
   };
 
+  let stopCredentialWait = () => {};
+  let credentialSubmitTimeout = null;
+
+  const scheduleCredentialSubmit = (submitButton) => {
+    credentialSubmitTimeout = setTimeout(() => {
+      credentialSubmitTimeout = null;
+      submitButton.click();
+    }, 300);
+  };
+
   const waitForAutofillAndSubmit = ({ userField, passField, submitButton }) => {
     if (!userField || !passField || !submitButton) return;
 
     let intervalId = null;
     let timeoutId = null;
     let settled = false;
+    let dispatching = false;
 
     const cleanup = () => {
       if (intervalId) clearInterval(intervalId);
@@ -540,19 +586,30 @@
       passField.removeEventListener('change', trySubmit);
     };
 
+    stopCredentialWait = () => {
+      settled = true;
+      cleanup();
+    };
+
     function trySubmit() {
-      if (settled) return;
+      if (settled || dispatching) return;
       if (!userField.value.trim() || !passField.value) return;
 
-      dispatchFieldEvents(userField);
-      dispatchFieldEvents(passField);
+      // Our synthetic input/change events also reach the listeners below.
+      dispatching = true;
+      try {
+        dispatchFieldEvents(userField);
+        dispatchFieldEvents(passField);
+      } finally {
+        dispatching = false;
+      }
       if (submitButton.disabled) return;
 
       settled = true;
       cleanup();
       showOverlay();
       notifyLoginSucceeded();
-      setTimeout(() => submitButton.click(), 300);
+      scheduleCredentialSubmit(submitButton);
     }
 
     const handleTimeout = () => {
@@ -582,7 +639,7 @@
 
     if (!submitButton.disabled) {
       notifyLoginSucceeded();
-      setTimeout(() => submitButton.click(), 300);
+      scheduleCredentialSubmit(submitButton);
     }
   };
 
@@ -595,6 +652,8 @@
 
   // ── Main logic ──
   const run = () => {
+    if (location.hostname === 'access.ethz.ch' &&
+        (!isAccessAuthPage() || !getIdpLoginFields())) return;
     if (!isLoginAutomationPage()) return;
 
     const onCredentialPage = (isIdpPage() && hasLoginForm()) || isLdapLoginPage();
@@ -667,9 +726,7 @@
               return;
             }
 
-            const userField = findFirstMatch(USERNAME_SELECTORS);
-            const passField = findFirstMatch(PASSWORD_SELECTORS);
-            const submitButton = findSubmitButton();
+            const { userField, passField, submitButton } = getIdpLoginFields();
 
             if (usesStoredCredentials) {
               fillAndSubmitStoredCredentials({
@@ -731,5 +788,51 @@
     });
   };
 
-  run();
+  let formWaitInterval = null;
+  let formWaitTimeout = null;
+
+  const stopFormWait = () => {
+    clearInterval(formWaitInterval);
+    clearTimeout(formWaitTimeout);
+    formWaitInterval = null;
+    formWaitTimeout = null;
+  };
+
+  const stopPendingLogin = () => {
+    stopFormWait();
+    stopCredentialWait();
+    clearTimeout(credentialSubmitTimeout);
+    credentialSubmitTimeout = null;
+  };
+
+  const start = () => {
+    stopPendingLogin();
+    if (!isAccessAuthPage()) {
+      run();
+      return;
+    }
+
+    // Redirect destinations can render or enable the form after document_end.
+    // Stop as soon as it is ready; run() still checks setup, failure and logout.
+    let handled = false;
+    const attempt = () => {
+      if (handled) return true;
+      if (!getIdpLoginFields()) return false;
+      handled = true;
+      stopFormWait();
+      run();
+      return true;
+    };
+
+    if (attempt()) return;
+    formWaitInterval = setInterval(attempt, AUTOFILL_POLL_MS);
+    formWaitTimeout = setTimeout(stopFormWait, LOGIN_FORM_WAIT_MS);
+  };
+
+  window.addEventListener('pagehide', stopPendingLogin);
+  window.addEventListener('pageshow', (event) => {
+    // Cached documents do not execute the content script again on restoration.
+    if (event.persisted && isAccessAuthPage()) start();
+  });
+  start();
 })();

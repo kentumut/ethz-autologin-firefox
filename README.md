@@ -1,6 +1,6 @@
 # ETHZ Auto-Login
 
-Browser extension that automatically continues ETHZ login flows (Shibboleth / SWITCH AAI) in Chrome, Firefox, and Zen Browser. Save your ETHZ password in your browser passwords first; by default the extension uses the password filled by the browser password manager. If browser password manager autofill is disabled, users can optionally store credentials in the extension for fully automatic login.
+Browser extension that automatically continues ETHZ login flows (ETH Authentication, Shibboleth / SWITCH AAI) in Chrome, Firefox, and Zen Browser. Save your ETHZ password in your browser passwords first; by default the extension uses the password filled by the browser password manager. If browser password manager autofill is disabled, users can optionally store credentials in the extension for fully automatic login.
 
 ## Features
 
@@ -18,7 +18,7 @@ Browser extension that automatically continues ETHZ login flows (Shibboleth / SW
 | Script | Where it runs | Purpose |
 |--------|----------------|---------|
 | `src/logout-watch.js` | `*://*.ethz.ch/*` | Detect logout clicks (no credentials, no DOM observers) |
-| `src/content.js` | `aai-logon.ethz.ch`, `gitlab.inf.ethz.ch`, `*/auth/shibboleth/login.php*`, `*/Shibboleth.sso/*` | Login automation, overlays, autofill |
+| `src/content.js` | `access.ethz.ch/idpauthapp/`, `aai-logon.ethz.ch`, `gitlab.inf.ethz.ch`, `*/auth/shibboleth/login.php*`, `*/Shibboleth.sso/*` | Login automation, overlays, autofill |
 | `src/wayf.js` | `wayf.switch.ch` | Select ETH Zurich on the SWITCH AAI org picker |
 
 Non-ETH sites (Google, GitHub, etc.) never receive these scripts. Host permissions for `*.ethz.ch` do not inject code by themselves.
@@ -119,7 +119,7 @@ Suggested reviewer notes for AMO signing:
 ```text
 ETHZ Auto-Login stores setup state such as the ETHZ username, login mode, and temporary pause/failure flags. By default, the password comes from the browser password manager autofill on the login page. If the user explicitly chooses extension storage mode, it also stores the ETHZ password in extension local storage.
 The extension does not make analytics, telemetry, API, or other outbound network requests.
-In password-manager mode, passwords are saved in the browser password manager and are not stored by the extension. In extension-storage mode, login forms on aai-logon.ethz.ch and gitlab.inf.ethz.ch are filled from extension local storage.
+In password-manager mode, passwords are saved in the browser password manager and are not stored by the extension. In extension-storage mode, login forms on access.ethz.ch/idpauthapp/, aai-logon.ethz.ch, and gitlab.inf.ethz.ch are filled from extension local storage.
 content.js runs only on login-related *.ethz.ch URLs; logout-watch.js is a minimal script on all *.ethz.ch pages for logout detection only.
 wayf.switch.ch content script only selects ETH Zurich as the identity provider.
 Build command: npm run build:firefox
@@ -149,6 +149,8 @@ The build script reads extension files from `src/`, includes the root `PRIVACY.m
 
 ## Usage
 
+For the new ETH Authentication page, save or update your browser password-manager entry for **https://access.ethz.ch**. A login saved only for `aai-logon.ethz.ch` may not autofill on the new host. The extension handles the username/password step; complete any subsequent multi-factor authentication yourself. Legacy ETHZ and SWITCH AAI flows remain supported.
+
 1. Click the extension icon in your toolbar
 2. Enter your ETH username
 3. Choose **Password manager** to use the password saved in your browser passwords, or **Store in extension** if browser password manager autofill is disabled
@@ -163,13 +165,20 @@ If login fails, the extension will notify you and stop trying. Update the saved 
 - Extension-storage mode optionally stores the ETHZ password locally in this extension for convenience when browser password manager autofill is disabled
 - Stored extension credentials are recoverable by someone with local extension/profile access
 - No external network calls, analytics, or tracking
-- Auto-submit restricted to `aai-logon.ethz.ch` and `gitlab.inf.ethz.ch`
+- Credential auto-submit restricted to `access.ethz.ch/idpauthapp/`, `aai-logon.ethz.ch`, and `gitlab.inf.ethz.ch`
 - Credentials are read from extension storage only on pages with login forms, not on every `*.ethz.ch` tab
 - 100% open source — read every line of code
 
 See [PRIVACY.md](PRIVACY.md) for the full policy.
 
 ## Changelog
+
+### Unreleased
+
+- Wait for delayed ETH Access forms and recheck login pages restored from the browser's back/forward cache
+- Support the username/password form at `https://access.ethz.ch/idpauthapp/` in both login modes; leave subsequent multi-factor challenges to the user
+- Update password-manager setup instructions for the new ETH Authentication host
+- Prevent autofill input events from recursively triggering submission checks
 
 ### 3.1
 
@@ -195,6 +204,7 @@ Extension files live in `src/`, with build and signing tooling in `scripts/`. Pr
 | `src/welcome.html/js` | First-install setup UI |
 | `src/icons/` | Extension icons |
 | `scripts/build.js` | Browser-specific build output |
+| `scripts/content.test.js` | Local login-form regression tests using dummy credentials (`npm test`) |
 
 ## License
 

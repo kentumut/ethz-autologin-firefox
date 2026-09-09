@@ -27,6 +27,8 @@
     },
     {
       "matches": [
+        "https://access.ethz.ch/idpauthapp",
+        "https://access.ethz.ch/idpauthapp/*",
         "*://aai-logon.ethz.ch/*",
         "*://gitlab.inf.ethz.ch/*",
         "*://*.ethz.ch/*/auth/shibboleth/login.php*",
